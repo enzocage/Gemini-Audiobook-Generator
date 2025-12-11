@@ -1,8 +1,8 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { BookOpen, Play, Download, Loader2, Sparkles, StopCircle, Scissors, Coins, ArrowRight, Volume2, X, Settings, Key, CheckCircle, AlertTriangle, ShieldCheck, Tag, Menu, LayoutTemplate, ChevronRight, Zap } from 'lucide-react';
-import { VoiceName, ModelId, AudioChunk, GenerationState, AudioFormat } from './types';
+import { BookOpen, Play, Download, Loader2, Sparkles, StopCircle, Scissors, Coins, ArrowRight, Volume2, X, Settings, Key, CheckCircle, AlertTriangle, ShieldCheck, Tag, Menu, LayoutTemplate, ChevronRight, Zap, Image as ImageIcon, ImagePlus, RefreshCw } from 'lucide-react';
+import { VoiceName, ModelId, AudioChunk, GenerationState, AudioFormat, GeneratedImage } from './types';
 import { createSmartChunks, base64ToUint8Array, concatenateAudioBuffers, createWavFile, createMp3File } from './utils/audioUtils';
-import { generateSpeechChunk, setCustomApiKey, validateApiKey } from './services/geminiService';
+import { generateSpeechChunk, setCustomApiKey, validateApiKey, generateStyleDescription, generateNanobanaImage } from './services/geminiService';
 import VoiceSelector from './components/VoiceSelector';
 import ModelSelector from './components/ModelSelector';
 import FormatSelector from './components/FormatSelector';
@@ -40,6 +40,10 @@ const App: React.FC = () => {
   });
   const [finalBlob, setFinalBlob] = useState<Blob | null>(null);
   
+  // Image Generation State
+  const [globalStylePrompt, setGlobalStylePrompt] = useState<string | null>(null);
+  const [imageCounts, setImageCounts] = useState<Record<number, number>>({});
+
   const abortRef = useRef<boolean>(false);
 
   // Initialize Custom Key from LocalStorage
@@ -103,6 +107,7 @@ const App: React.FC = () => {
   useEffect(() => {
     setStartChunkIndex(0);
     setPreviewChunks([]); 
+    setGlobalStylePrompt(null);
   }, [text]);
 
   const handlePreviewChunks = () => {
@@ -110,6 +115,15 @@ const App: React.FC = () => {
     const chunks = createSmartChunks(text, 2000);
     setPreviewChunks(chunks);
     setStartChunkIndex(0);
+    
+    // Reset audio chunks to match new preview
+    const initialAudioChunks: AudioChunk[] = chunks.map((t, i) => ({
+      id: i,
+      text: t,
+      status: 'pending',
+      images: []
+    }));
+    setAudioChunks(initialAudioChunks);
   };
 
   const downloadBlob = useCallback((blob: Blob, filename: string) => {
@@ -203,11 +217,63 @@ const App: React.FC = () => {
       }
   };
 
+  // --- IMAGE GENERATION LOGIC ---
+  const handleGenerateImages = async (chunkIndex: number) => {
+      const count = imageCounts[chunkIndex] || 1;
+      const chunkText = previewChunks[chunkIndex];
+      if (!chunkText) return;
+
+      // Update state to show loading
+      setAudioChunks(prev => prev.map(c => c.id === chunkIndex ? { ...c, isGeneratingImages: true } : c));
+
+      try {
+          // 1. Get or Generate Style Prompt
+          let stylePrompt = globalStylePrompt;
+          if (!stylePrompt) {
+              stylePrompt = await generateStyleDescription(text);
+              setGlobalStylePrompt(stylePrompt);
+          }
+
+          // 2. Construct Full Prompt
+          const fullPrompt = `${stylePrompt}. Scene description: ${chunkText}`;
+
+          // 3. Generate X images in parallel
+          const promises = Array.from({ length: count }).map(() => generateNanobanaImage(fullPrompt));
+          const results = await Promise.all(promises);
+
+          // 4. Update Chunk with images
+          const newImages: GeneratedImage[] = results.map((url, idx) => ({
+              id: `${Date.now()}-${idx}`,
+              data: url
+          }));
+
+          setAudioChunks(prev => prev.map(c => {
+              if (c.id === chunkIndex) {
+                  return {
+                      ...c,
+                      isGeneratingImages: false,
+                      images: [...(c.images || []), ...newImages]
+                  };
+              }
+              return c;
+          }));
+
+      } catch (error) {
+          console.error("Image generation failed", error);
+          setAudioChunks(prev => prev.map(c => c.id === chunkIndex ? { ...c, isGeneratingImages: false } : c));
+          alert("Failed to generate images. Check API limits or key.");
+      }
+  };
+
+  const handleImageCountChange = (chunkIndex: number, val: number) => {
+      setImageCounts(prev => ({ ...prev, [chunkIndex]: val }));
+  };
+
+  // --- AUDIO GENERATION LOGIC ---
   const handleGenerate = useCallback(async () => {
     if (!text.trim()) return;
 
     setFinalBlob(null);
-    setAudioChunks([]);
     setPreviewUrl(null);
     setPreviewChunkCount(0);
     setGenerationState({
@@ -223,13 +289,15 @@ const App: React.FC = () => {
       ? previewChunks 
       : createSmartChunks(text, 2000);
 
-    const initialAudioChunks: AudioChunk[] = textChunksToProcess.map((t, i) => ({
-      id: i,
-      text: t,
-      status: i < startChunkIndex ? 'completed' : 'pending'
-    }));
-
-    setAudioChunks(initialAudioChunks);
+    // If audioChunks already initialized (e.g. from preview), use them, otherwise init
+    if (audioChunks.length === 0 || audioChunks.length !== textChunksToProcess.length) {
+        const initialAudioChunks: AudioChunk[] = textChunksToProcess.map((t, i) => ({
+          id: i,
+          text: t,
+          status: i < startChunkIndex ? 'completed' : 'pending'
+        }));
+        setAudioChunks(initialAudioChunks);
+    }
     
     const totalToGenerate = textChunksToProcess.length - startChunkIndex;
     setGenerationState(prev => ({ ...prev, totalChunks: textChunksToProcess.length }));
@@ -346,7 +414,7 @@ const App: React.FC = () => {
           error: error instanceof Error ? error.message : "An unexpected error occurred" 
       }));
     }
-  }, [text, voice, model, format, downloadBlob, previewChunks, startChunkIndex, projectName]);
+  }, [text, voice, model, format, downloadBlob, previewChunks, startChunkIndex, projectName, audioChunks]);
 
   const handleStop = () => {
       abortRef.current = true;
@@ -574,37 +642,99 @@ const App: React.FC = () => {
                         
                         <div className="grid grid-cols-1 gap-2">
                             {previewChunks.map((chunkText, idx) => {
-                                const isCompleted = idx < startChunkIndex || (audioChunks[idx]?.status === 'completed');
-                                const isGenerating = audioChunks[idx]?.status === 'generating';
+                                const chunkData = audioChunks[idx];
+                                const isCompleted = idx < startChunkIndex || (chunkData?.status === 'completed');
+                                const isGenerating = chunkData?.status === 'generating';
                                 const isPending = !isCompleted && !isGenerating;
                                 const isSelected = idx === startChunkIndex;
+                                const hasImages = chunkData?.images && chunkData.images.length > 0;
+                                const isGeneratingImages = chunkData?.isGeneratingImages;
 
                                 return (
                                     <div 
                                         key={idx}
-                                        onClick={() => !generationState.isGenerating && setStartChunkIndex(idx)}
                                         className={`
-                                            flex items-start gap-4 p-3 rounded-lg border transition-all cursor-pointer select-none
+                                            flex flex-col rounded-lg border transition-all overflow-hidden
                                             ${isSelected ? 'bg-indigo-50 border-indigo-300 ring-1 ring-indigo-200' : 'bg-white border-stone-200 hover:border-stone-300'}
                                             ${isGenerating ? 'border-indigo-500 bg-indigo-50' : ''}
-                                            ${isCompleted && !isSelected ? 'opacity-60 bg-stone-50' : ''}
+                                            ${isCompleted && !isSelected ? 'opacity-90 bg-stone-50' : ''}
                                         `}
                                     >
-                                        <div className={`
-                                            w-8 h-8 rounded-md flex items-center justify-center text-xs font-bold shrink-0 transition-colors
-                                            ${isCompleted ? 'bg-emerald-100 text-emerald-700' : ''}
-                                            ${isGenerating ? 'bg-indigo-600 text-white animate-pulse' : ''}
-                                            ${isPending && !isSelected ? 'bg-zinc-100 text-zinc-500' : ''}
-                                            ${isSelected && !isGenerating ? 'bg-indigo-600 text-white' : ''}
-                                        `}>
-                                            {isCompleted ? <CheckCircle size={14}/> : (idx + 1)}
+                                        <div 
+                                            onClick={() => !generationState.isGenerating && setStartChunkIndex(idx)}
+                                            className="flex items-start gap-4 p-3 cursor-pointer select-none"
+                                        >
+                                            <div className={`
+                                                w-8 h-8 rounded-md flex items-center justify-center text-xs font-bold shrink-0 transition-colors
+                                                ${isCompleted ? 'bg-emerald-100 text-emerald-700' : ''}
+                                                ${isGenerating ? 'bg-indigo-600 text-white animate-pulse' : ''}
+                                                ${isPending && !isSelected ? 'bg-zinc-100 text-zinc-500' : ''}
+                                                ${isSelected && !isGenerating ? 'bg-indigo-600 text-white' : ''}
+                                            `}>
+                                                {isCompleted ? <CheckCircle size={14}/> : (idx + 1)}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm text-zinc-600 font-serif leading-relaxed line-clamp-2">{chunkText}</p>
+                                            </div>
+                                            {isSelected && !generationState.isGenerating && (
+                                                <span className="text-[10px] uppercase font-bold text-indigo-600 bg-indigo-100 px-2 py-1 rounded">Start Here</span>
+                                            )}
                                         </div>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-sm text-zinc-600 font-serif leading-relaxed line-clamp-2">{chunkText}</p>
+
+                                        {/* Image Generation Toolbar */}
+                                        <div className="px-3 pb-3 pt-1 flex flex-col gap-3">
+                                            {/* Toolbar */}
+                                            <div className="flex items-center gap-2 border-t border-zinc-100 pt-2">
+                                                <select 
+                                                    value={imageCounts[idx] || 1}
+                                                    onChange={(e) => handleImageCountChange(idx, parseInt(e.target.value))}
+                                                    className="text-xs border border-zinc-200 rounded px-2 py-1.5 bg-zinc-50 text-zinc-700 outline-none focus:border-indigo-400"
+                                                >
+                                                    {Array.from({length: 20}, (_, i) => i + 1).map(n => (
+                                                        <option key={n} value={n}>{n} Image{n > 1 ? 's' : ''}</option>
+                                                    ))}
+                                                </select>
+
+                                                <button
+                                                    onClick={() => handleGenerateImages(idx)}
+                                                    disabled={isGeneratingImages}
+                                                    className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-medium rounded border border-indigo-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    {isGeneratingImages ? <Loader2 className="w-3 h-3 animate-spin"/> : <ImageIcon className="w-3 h-3" />}
+                                                    <span>Generate image of the chunk with Nanobana</span>
+                                                </button>
+                                            </div>
+
+                                            {/* Generated Images Grid */}
+                                            {hasImages && (
+                                                <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-2">
+                                                    {chunkData.images!.map((img) => (
+                                                        <div key={img.id} className="relative aspect-square group rounded-md overflow-hidden bg-zinc-100 border border-zinc-200">
+                                                            <img 
+                                                                src={img.data} 
+                                                                alt="Generated illustration" 
+                                                                className="w-full h-full object-cover transition-transform group-hover:scale-110"
+                                                            />
+                                                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                                                <a 
+                                                                    href={img.data} 
+                                                                    download={`illustration_${idx}_${img.id}.png`}
+                                                                    className="p-1.5 bg-white/90 text-zinc-900 rounded-full hover:bg-white"
+                                                                    title="Download"
+                                                                >
+                                                                    <Download size={14} />
+                                                                </a>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                    {isGeneratingImages && (
+                                                        <div className="aspect-square rounded-md bg-zinc-50 border border-zinc-200 flex items-center justify-center">
+                                                            <Loader2 className="w-4 h-4 text-indigo-400 animate-spin" />
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
-                                        {isSelected && !generationState.isGenerating && (
-                                            <span className="text-[10px] uppercase font-bold text-indigo-600 bg-indigo-100 px-2 py-1 rounded">Start Here</span>
-                                        )}
                                     </div>
                                 );
                             })}

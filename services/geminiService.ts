@@ -158,3 +158,65 @@ export const translateText = async (text: string, targetLanguage: string): Promi
     return text;
   }
 };
+
+/**
+ * Analyzes the text to create a consistent art style prompt.
+ */
+export const generateStyleDescription = async (fullText: string): Promise<string> => {
+    try {
+        const ai = getClient();
+        // Truncate to first 5000 chars to save tokens/time, usually enough to establish style
+        const context = fullText.slice(0, 5000);
+        
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: `Analyze the following text and define a consistent, high-quality illustration style suitable for an audiobook visualization. 
+            Consider the genre, tone, and setting. 
+            Output ONLY the visual style description (e.g., "Digital painting, moody lighting, cyberpunk aesthetic, blue and purple color palette").
+            Do not include "The style is..." or other filler.
+            
+            Text excerpt:
+            "${context}"`
+        });
+        
+        return response.text?.trim() || "Digital art, high resolution, cinematic lighting";
+    } catch (error) {
+        console.warn("Style generation failed, using default", error);
+        return "Digital art, high resolution, cinematic lighting";
+    }
+};
+
+/**
+ * Generates an image using Nano Banana (gemini-2.5-flash-image)
+ */
+export const generateNanobanaImage = async (prompt: string): Promise<string> => {
+    try {
+        const ai = getClient();
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: {
+                parts: [{ text: prompt }]
+            },
+            config: {
+                imageConfig: {
+                    aspectRatio: "1:1"
+                }
+            }
+        });
+
+        // Iterate parts to find image
+        const parts = response.candidates?.[0]?.content?.parts;
+        if (parts) {
+            for (const part of parts) {
+                if (part.inlineData && part.inlineData.data) {
+                    return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+                }
+            }
+        }
+        
+        throw new Error("No image data found in response");
+    } catch (error) {
+        handleGeminiError(error);
+        throw error;
+    }
+};

@@ -15,11 +15,18 @@ export enum ModelId {
 
 export type AudioFormat = 'wav' | 'mp3';
 
+export interface GeneratedImage {
+  id: string;
+  data: string; // base64 url
+}
+
 export interface AudioChunk {
   id: number;
   text: string;
   status: 'pending' | 'generating' | 'completed' | 'error';
   data?: Uint8Array; // Raw PCM data (Int16)
+  images?: GeneratedImage[];
+  isGeneratingImages?: boolean;
 }
 
 export interface GenerationState {
