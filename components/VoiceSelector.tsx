@@ -78,56 +78,58 @@ const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoice, onVoiceCha
   };
 
   return (
-    <div className="grid grid-cols-1 gap-2">
+    <div className="grid grid-cols-2 gap-2">
             {Object.values(VoiceName).map((voice) => {
                 const isSelected = selectedVoice === voice;
                 const isPlaying = playingVoice === voice;
                 const isLoading = loadingVoice === voice;
+                
+                const isFemale = ['Kore', 'Aoede', 'Leda'].includes(voice);
 
                 return (
                     <div
                         key={voice}
                         onClick={() => !disabled && onVoiceChange(voice)}
                         className={`
-                            relative group flex items-center justify-between px-3 py-2.5 rounded-lg border cursor-pointer transition-all
+                            relative group flex flex-col items-center justify-center p-2 rounded-lg border cursor-pointer transition-all h-20
                             ${isSelected 
-                                ? 'bg-blue-600/10 border-blue-500/50' 
-                                : 'bg-slate-900 border-slate-800 hover:border-slate-600 hover:bg-slate-800'
+                                ? 'bg-indigo-600 border-indigo-500 shadow-md shadow-indigo-100' 
+                                : 'bg-white border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50'
                             }
                             ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
                         `}
                     >
-                        <div className="flex items-center gap-3">
-                            <div className={`w-2 h-2 rounded-full ${isSelected ? 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]' : 'bg-slate-700'}`} />
-                            <div className="flex flex-col">
-                                <span className={`text-sm font-medium ${isSelected ? 'text-blue-100' : 'text-slate-300'}`}>
-                                    {voice}
-                                </span>
-                                <span className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">
-                                    {voice === 'Kore' || voice === 'Aoede' || voice === 'Leda' ? 'Female' : 'Male'}
-                                </span>
-                            </div>
+                        <div className="flex items-center justify-between w-full mb-1">
+                             <span className={`text-[10px] font-bold uppercase tracking-wider opacity-60 ${isSelected ? 'text-indigo-100' : 'text-zinc-400'}`}>
+                                {isFemale ? 'Fem' : 'Masc'}
+                             </span>
+                             
+                             <button
+                                onClick={(e) => handlePlayPreview(e, voice)}
+                                disabled={disabled || (loadingVoice !== null && loadingVoice !== voice)}
+                                className={`
+                                    w-5 h-5 rounded-full flex items-center justify-center transition-all
+                                    ${isPlaying 
+                                        ? 'bg-white text-indigo-600' 
+                                        : isSelected ? 'bg-indigo-500 text-white hover:bg-white hover:text-indigo-600' : 'bg-zinc-100 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-600'
+                                    }
+                                `}
+                            >
+                                {isLoading ? (
+                                    <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                                ) : isPlaying ? (
+                                    <Square className="w-2 h-2 fill-current" />
+                                ) : (
+                                    <Play className="w-2 h-2 ml-0.5 fill-current" />
+                                )}
+                            </button>
                         </div>
-
-                        <button
-                            onClick={(e) => handlePlayPreview(e, voice)}
-                            disabled={disabled || (loadingVoice !== null && loadingVoice !== voice)}
-                            className={`
-                                w-7 h-7 rounded-full flex items-center justify-center transition-all border
-                                ${isPlaying 
-                                    ? 'bg-blue-500 border-blue-400 text-white' 
-                                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700 hover:text-white'
-                                }
-                            `}
-                        >
-                            {isLoading ? (
-                                <Loader2 className="w-3 h-3 animate-spin" />
-                            ) : isPlaying ? (
-                                <Square className="w-2.5 h-2.5 fill-current" />
-                            ) : (
-                                <Play className="w-2.5 h-2.5 ml-0.5 fill-current" />
-                            )}
-                        </button>
+                        
+                        <div className="text-center">
+                            <span className={`text-sm font-bold ${isSelected ? 'text-white' : 'text-zinc-600 group-hover:text-zinc-900'}`}>
+                                {voice}
+                            </span>
+                        </div>
                     </div>
                 );
             })}

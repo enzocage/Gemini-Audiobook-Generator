@@ -10,21 +10,21 @@ interface ModelSelectorProps {
 
 const ModelSelector: React.FC<ModelSelectorProps> = ({ selectedModel, onModelChange, disabled }) => {
   return (
-    <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
+    <div className="flex bg-zinc-50 p-1 rounded-lg border border-zinc-200">
         <button
             onClick={() => onModelChange(ModelId.Flash)}
             disabled={disabled}
             className={`
               flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-xs font-bold transition-all
               ${selectedModel === ModelId.Flash
-                ? 'bg-blue-600 text-white shadow-sm' 
-                : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+                ? 'bg-white text-indigo-600 shadow-sm ring-1 ring-zinc-200' 
+                : 'text-zinc-500 hover:text-zinc-900 hover:bg-white/50'
               }
               ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
             `}
           >
             <Zap className="w-3 h-3" />
-            <span>Flash 2.5</span>
+            <span>Flash</span>
           </button>
 
           <button
@@ -33,14 +33,14 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({ selectedModel, onModelCha
             className={`
               flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-xs font-bold transition-all
               ${selectedModel === ModelId.Pro
-                ? 'bg-purple-600 text-white shadow-sm' 
-                : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+                ? 'bg-white text-purple-600 shadow-sm ring-1 ring-zinc-200' 
+                : 'text-zinc-500 hover:text-zinc-900 hover:bg-white/50'
               }
               ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
             `}
           >
             <Star className="w-3 h-3" />
-            <span>Pro 2.5</span>
+            <span>Pro</span>
           </button>
     </div>
   );

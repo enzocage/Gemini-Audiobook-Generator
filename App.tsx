@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { BookOpen, Play, Download, Loader2, Sparkles, StopCircle, Scissors, Coins, ArrowRight, Volume2, X, Settings, Key, CheckCircle, AlertTriangle, ShieldCheck, Tag, Menu, LayoutTemplate } from 'lucide-react';
+import { BookOpen, Play, Download, Loader2, Sparkles, StopCircle, Scissors, Coins, ArrowRight, Volume2, X, Settings, Key, CheckCircle, AlertTriangle, ShieldCheck, Tag, Menu, LayoutTemplate, ChevronRight, Zap } from 'lucide-react';
 import { VoiceName, ModelId, AudioChunk, GenerationState, AudioFormat } from './types';
 import { createSmartChunks, base64ToUint8Array, concatenateAudioBuffers, createWavFile, createMp3File } from './utils/audioUtils';
 import { generateSpeechChunk, setCustomApiKey, validateApiKey } from './services/geminiService';
@@ -384,36 +384,58 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="h-screen bg-slate-900 text-slate-100 flex overflow-hidden font-sans selection:bg-blue-500/30">
+    <div className="h-screen bg-white text-zinc-900 flex overflow-hidden font-sans selection:bg-indigo-100 selection:text-indigo-900">
       
-      {/* --- LEFT SIDEBAR: STUDIO CONTROLS --- */}
-      <aside className="w-80 bg-slate-950 border-r border-slate-800 flex flex-col z-20 shadow-xl flex-shrink-0 overflow-y-auto">
+      {/* --- LEFT SIDEBAR: STUDIO CONTROLS (LIGHT MODE) --- */}
+      <aside className="w-80 bg-white border-r border-zinc-200 flex flex-col z-20 shadow-xl flex-shrink-0 overflow-y-auto relative">
         
         {/* Header */}
-        <div className="h-16 flex items-center gap-3 px-6 border-b border-slate-800 bg-slate-950 sticky top-0 z-10">
-           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-blue-900/50">
+        <div className="h-16 flex items-center gap-3 px-5 border-b border-zinc-100 bg-white sticky top-0 z-10">
+           <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-indigo-100">
                 <BookOpen size={18} />
            </div>
            <div>
-               <h1 className="text-base font-bold text-white tracking-tight leading-none">Gemini Studio</h1>
-               <span className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold">Audiobook Gen</span>
+               <h1 className="text-base font-bold text-zinc-900 tracking-tight leading-none">Audiobook</h1>
+               <span className="text-[10px] text-zinc-400 uppercase tracking-widest font-bold">Studio Gen 2.5</span>
            </div>
         </div>
 
-        <div className="p-6 space-y-8">
-            {/* Model & Format Group */}
-            <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                    <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Configuration</h2>
-                    <button 
-                        onClick={() => setShowSettings(true)}
-                        className={`p-1.5 rounded-md transition-colors ${userApiKey ? 'text-green-400 bg-green-400/10' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
-                    >
-                        <Settings size={14} />
-                    </button>
+        <div className="flex-1 p-5 space-y-6 overflow-y-auto">
+            
+            {/* API Key Status - Prominent & Light */}
+            <div 
+                onClick={() => setShowSettings(true)}
+                className={`
+                    p-3 rounded-xl border cursor-pointer transition-all group relative overflow-hidden
+                    ${userApiKey || keyStatus === 'valid' 
+                        ? 'bg-white border-indigo-200 hover:border-indigo-400 shadow-sm' 
+                        : 'bg-amber-50 border-amber-200 hover:border-amber-300'}
+                `}
+            >
+                <div className="flex justify-between items-start mb-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">API Access</span>
+                    <Settings size={14} className="text-zinc-400 group-hover:text-indigo-600 transition-colors" />
                 </div>
-                
-                <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                    {userApiKey ? (
+                        <>
+                            <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.4)]" />
+                            <span className="text-sm font-semibold text-zinc-700">Key Configured</span>
+                        </>
+                    ) : (
+                        <>
+                             <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                             <span className="text-sm font-semibold text-amber-700">Set API Key</span>
+                        </>
+                    )}
+                </div>
+            </div>
+
+            <div className="space-y-4">
+                <h2 className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                    <Zap size={12} /> Model & Format
+                </h2>
+                <div className="space-y-3">
                      <ModelSelector 
                         selectedModel={model}
                         onModelChange={setModel}
@@ -427,11 +449,13 @@ const App: React.FC = () => {
                 </div>
             </div>
 
-            <div className="w-full h-px bg-slate-800/50" />
+            <div className="w-full h-px bg-zinc-100" />
 
             {/* Voice Group */}
             <div className="space-y-4">
-                <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Cast</h2>
+                <h2 className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                    <Volume2 size={12} /> Voice Cast
+                </h2>
                 <VoiceSelector 
                     selectedVoice={voice} 
                     onVoiceChange={setVoice} 
@@ -440,39 +464,41 @@ const App: React.FC = () => {
                 />
             </div>
             
-            <div className="w-full h-px bg-slate-800/50" />
+            <div className="w-full h-px bg-zinc-100" />
 
             {/* Stats */}
-            <div className="bg-slate-900 rounded-lg p-4 border border-slate-800 space-y-3">
+            <div className="bg-zinc-50 rounded-lg p-4 border border-zinc-100 space-y-3">
                  <div className="flex justify-between items-center text-xs">
-                     <span className="text-slate-400">Tokens</span>
-                     <span className="font-mono text-slate-200">{costStats.tokens.toLocaleString()}</span>
+                     <span className="text-zinc-500">Input Tokens</span>
+                     <span className="font-mono text-zinc-700">{costStats.tokens.toLocaleString()}</span>
                  </div>
                  <div className="flex justify-between items-center text-xs">
-                     <span className="text-slate-400">Est. Duration</span>
-                     <span className="font-mono text-slate-200">~{costStats.minutes} min</span>
+                     <span className="text-zinc-500">Est. Time</span>
+                     <span className="font-mono text-zinc-700">~{costStats.minutes} min</span>
                  </div>
-                 <div className="flex justify-between items-center text-xs pt-2 border-t border-slate-800/50">
-                     <span className="text-slate-400">Est. Cost</span>
-                     <span className="font-mono text-amber-400">${costStats.cost}</span>
+                 <div className="flex justify-between items-center text-xs pt-2 border-t border-zinc-200">
+                     <span className="text-zinc-500">Est. Cost</span>
+                     <span className="font-mono text-emerald-600 font-bold">${costStats.cost}</span>
                  </div>
             </div>
-
+            
+            {/* Bottom Padding */}
+            <div className="h-8"></div>
         </div>
       </aside>
 
       {/* --- RIGHT MAIN AREA: MANUSCRIPT CANVAS --- */}
-      <main className="flex-1 flex flex-col bg-slate-100 relative overflow-hidden">
+      <main className="flex-1 flex flex-col bg-stone-50 relative overflow-hidden">
         
         {/* Top Bar (Project Name & Actions) */}
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 flex-shrink-0 z-10">
+        <header className="h-16 bg-white border-b border-stone-200 flex items-center justify-between px-8 flex-shrink-0 z-10">
             <div className="flex items-center gap-3 w-1/2">
-                <LayoutTemplate className="text-slate-300 w-5 h-5" />
+                <LayoutTemplate className="text-zinc-300 w-5 h-5" />
                 <input 
                     type="text" 
                     value={projectName}
                     onChange={(e) => setProjectName(e.target.value)}
-                    className="text-lg font-semibold text-slate-800 bg-transparent outline-none placeholder:text-slate-300 w-full hover:bg-slate-50 focus:bg-slate-50 rounded px-2 -ml-2 transition-colors truncate"
+                    className="text-lg font-semibold text-zinc-800 bg-transparent outline-none placeholder:text-zinc-300 w-full hover:bg-stone-50 focus:bg-stone-50 rounded px-2 -ml-2 transition-colors truncate"
                     placeholder="Untitled Project"
                 />
             </div>
@@ -482,17 +508,17 @@ const App: React.FC = () => {
                  {generationState.isGenerating && (
                      <div className="flex items-center gap-3 mr-4">
                          <div className="flex flex-col items-end">
-                             <span className="text-xs font-bold text-blue-600 uppercase">Generating</span>
-                             <span className="text-[10px] text-slate-400">Chunk {generationState.currentChunkIndex} / {generationState.totalChunks}</span>
+                             <span className="text-xs font-bold text-indigo-600 uppercase">Generating</span>
+                             <span className="text-[10px] text-zinc-400">Chunk {generationState.currentChunkIndex} / {generationState.totalChunks}</span>
                          </div>
-                         <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
+                         <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />
                      </div>
                  )}
 
                  <button
                     onClick={handlePreviewChunks}
                     disabled={!text || generationState.isGenerating}
-                    className="flex items-center gap-2 px-4 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg text-sm font-medium transition-all"
+                    className="flex items-center gap-2 px-4 py-2 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg text-sm font-medium transition-all"
                  >
                     <Scissors className="w-4 h-4" />
                     <span>Chunk Preview</span>
@@ -511,10 +537,10 @@ const App: React.FC = () => {
                         onClick={handleGenerate}
                         disabled={!text}
                         className={`
-                            flex items-center gap-2 px-6 py-2.5 rounded-lg font-semibold text-white shadow-md shadow-blue-200 transition-all
+                            flex items-center gap-2 px-6 py-2.5 rounded-lg font-semibold text-white shadow-md shadow-indigo-200 transition-all
                             ${!text 
-                                ? 'bg-slate-300 cursor-not-allowed shadow-none' 
-                                : 'bg-blue-600 hover:bg-blue-700 hover:translate-y-[-1px]'
+                                ? 'bg-zinc-300 cursor-not-allowed shadow-none' 
+                                : 'bg-indigo-600 hover:bg-indigo-700 hover:translate-y-[-1px]'
                             }
                         `}
                     >
@@ -530,7 +556,7 @@ const App: React.FC = () => {
             <div className="max-w-3xl mx-auto space-y-6 pb-32">
                 
                 {/* Script Input (Visualized as Paper) */}
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 min-h-[600px] p-10 relative group transition-shadow hover:shadow-md">
+                <div className="bg-white rounded-xl shadow-sm border border-stone-200 min-h-[600px] p-12 relative group transition-shadow hover:shadow-md">
                      <TextInput 
                         text={text} 
                         onTextChange={setText} 
@@ -542,8 +568,8 @@ const App: React.FC = () => {
                 {previewChunks.length > 0 && (
                     <div className="space-y-3 pt-6 animate-in fade-in slide-in-from-bottom-4">
                         <div className="flex items-center justify-between">
-                            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Processing Timeline</h3>
-                            <span className="text-xs text-slate-400">{previewChunks.length} Segments</span>
+                            <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Processing Timeline</h3>
+                            <span className="text-xs text-zinc-400">{previewChunks.length} Segments</span>
                         </div>
                         
                         <div className="grid grid-cols-1 gap-2">
@@ -559,25 +585,25 @@ const App: React.FC = () => {
                                         onClick={() => !generationState.isGenerating && setStartChunkIndex(idx)}
                                         className={`
                                             flex items-start gap-4 p-3 rounded-lg border transition-all cursor-pointer select-none
-                                            ${isSelected ? 'bg-blue-50/50 border-blue-400 ring-1 ring-blue-400/30' : 'bg-white border-slate-200 hover:border-slate-300'}
-                                            ${isGenerating ? 'border-blue-500 bg-blue-50' : ''}
-                                            ${isCompleted && !isSelected ? 'opacity-60 bg-slate-50' : ''}
+                                            ${isSelected ? 'bg-indigo-50 border-indigo-300 ring-1 ring-indigo-200' : 'bg-white border-stone-200 hover:border-stone-300'}
+                                            ${isGenerating ? 'border-indigo-500 bg-indigo-50' : ''}
+                                            ${isCompleted && !isSelected ? 'opacity-60 bg-stone-50' : ''}
                                         `}
                                     >
                                         <div className={`
                                             w-8 h-8 rounded-md flex items-center justify-center text-xs font-bold shrink-0 transition-colors
-                                            ${isCompleted ? 'bg-green-100 text-green-700' : ''}
-                                            ${isGenerating ? 'bg-blue-600 text-white animate-pulse' : ''}
-                                            ${isPending && !isSelected ? 'bg-slate-100 text-slate-500' : ''}
-                                            ${isSelected && !isGenerating ? 'bg-blue-600 text-white' : ''}
+                                            ${isCompleted ? 'bg-emerald-100 text-emerald-700' : ''}
+                                            ${isGenerating ? 'bg-indigo-600 text-white animate-pulse' : ''}
+                                            ${isPending && !isSelected ? 'bg-zinc-100 text-zinc-500' : ''}
+                                            ${isSelected && !isGenerating ? 'bg-indigo-600 text-white' : ''}
                                         `}>
                                             {isCompleted ? <CheckCircle size={14}/> : (idx + 1)}
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <p className="text-sm text-slate-600 font-serif leading-relaxed line-clamp-2">{chunkText}</p>
+                                            <p className="text-sm text-zinc-600 font-serif leading-relaxed line-clamp-2">{chunkText}</p>
                                         </div>
                                         {isSelected && !generationState.isGenerating && (
-                                            <span className="text-[10px] uppercase font-bold text-blue-600 bg-blue-100 px-2 py-1 rounded">Start Here</span>
+                                            <span className="text-[10px] uppercase font-bold text-indigo-600 bg-indigo-100 px-2 py-1 rounded">Start Here</span>
                                         )}
                                     </div>
                                 );
@@ -590,7 +616,7 @@ const App: React.FC = () => {
 
         {/* --- BOTTOM PLAYER DECK (Sticky) --- */}
         {(finalBlob || previewUrl || generationState.isGenerating) && (
-            <div className="h-20 bg-white border-t border-slate-200 flex items-center px-6 gap-6 shadow-2xl z-30 flex-shrink-0 animate-in slide-in-from-bottom-full duration-500">
+            <div className="h-20 bg-white border-t border-zinc-200 flex items-center px-6 gap-6 shadow-2xl z-30 flex-shrink-0 animate-in slide-in-from-bottom-full duration-500">
                 
                 {/* Status / Error Message Area */}
                 <div className="w-1/4 min-w-[200px]">
@@ -603,19 +629,19 @@ const App: React.FC = () => {
                             )}
                         </div>
                     ) : (finalBlob ? (
-                        <div className="flex items-center gap-2 text-green-600">
-                             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                        <div className="flex items-center gap-2 text-emerald-600">
+                             <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                              <span className="text-sm font-bold">Generation Complete</span>
                         </div>
                     ) : (
-                        <div className="flex items-center gap-2 text-blue-600">
+                        <div className="flex items-center gap-2 text-indigo-600">
                              <Loader2 size={14} className="animate-spin" />
                              <span className="text-xs font-medium uppercase tracking-wide">Processing Audio...</span>
                         </div>
                     ))}
                 </div>
 
-                {/* Player Center */}
+                {/* Player Center - Light Theme for Player */}
                 <div className="flex-1 max-w-2xl flex flex-col items-center justify-center gap-1">
                     <audio 
                         ref={audioRef}
@@ -625,7 +651,7 @@ const App: React.FC = () => {
                         onEnded={handleAudioEnded}
                         className="w-full h-8" 
                     />
-                    <div className="text-[10px] text-slate-400 font-medium">
+                    <div className="text-[10px] text-zinc-500 font-medium">
                         {previewUrl ? `Previewing Chunk ${previewChunkCount} / ${readyChunksCount} ready` : 'Full Audiobook Playback'}
                     </div>
                 </div>
@@ -635,7 +661,7 @@ const App: React.FC = () => {
                      {finalBlob && (
                         <button
                             onClick={downloadFinalAudio}
-                            className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-medium transition-colors"
+                            className="flex items-center gap-2 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg text-sm font-medium transition-colors"
                         >
                             <Download size={16} />
                             <span>Download {format.toUpperCase()}</span>
@@ -647,57 +673,90 @@ const App: React.FC = () => {
 
       </main>
 
-      {/* Settings Modal (Overlay) */}
+      {/* Settings Modal (Refined Light Mode) */}
       {showSettings && (
-          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
-                  <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                      <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                          <Settings size={18} /> Settings
+          <div className="fixed inset-0 bg-zinc-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+              <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-zinc-100 scale-100">
+                  <div className="px-6 py-5 border-b border-zinc-100 flex justify-between items-center bg-white">
+                      <h3 className="font-bold text-lg text-zinc-900 flex items-center gap-2">
+                          <Settings className="text-zinc-400" size={20} /> Settings
                       </h3>
-                      <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-600">
-                          <X size={18} />
+                      <button onClick={() => setShowSettings(false)} className="p-2 -mr-2 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-50 rounded-full transition-colors">
+                          <X size={20} />
                       </button>
                   </div>
                   
-                  <div className="p-6 space-y-6">
-                      {/* Paid Key Promo */}
-                      <div className="bg-slate-900 rounded-xl p-5 text-center space-y-3 relative overflow-hidden">
-                           <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-br from-amber-400 to-transparent opacity-20 blur-xl" />
-                           <div className="w-10 h-10 bg-amber-500/20 text-amber-500 rounded-full flex items-center justify-center mx-auto mb-2">
-                                <ShieldCheck size={20} />
-                           </div>
-                           <h4 className="text-white font-bold">Rate Limits? Go Pro.</h4>
-                           <p className="text-xs text-slate-400 leading-relaxed">
-                               Gemini 2.5 Pro models require a paid cloud project for high-volume generation.
-                           </p>
-                           <button 
-                               onClick={handleSelectPaidKey}
-                               className="w-full py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg text-sm transition-colors"
-                           >
-                               Select Paid API Key
-                           </button>
-                           <a href="https://ai.google.dev/pricing" target="_blank" rel="noreferrer" className="text-[10px] text-slate-500 hover:text-slate-300 underline block mt-2">
-                               View Pricing Documentation
-                           </a>
+                  <div className="p-6 space-y-8">
+                      {/* Paid Key Promo (Highlighted) */}
+                      <div className="relative group">
+                          <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl opacity-75 blur transition duration-1000 group-hover:duration-200 animate-tilt"></div>
+                          <div className="relative bg-white rounded-xl p-6 ring-1 ring-zinc-900/5 leading-none space-y-4">
+                              <div className="flex items-center gap-4">
+                                  <div className="bg-indigo-50 p-3 rounded-lg text-indigo-600">
+                                      <ShieldCheck size={24} />
+                                  </div>
+                                  <div>
+                                      <h4 className="font-bold text-zinc-900">High Volume Access</h4>
+                                      <p className="text-xs text-zinc-500 mt-1">Avoid rate limits with a paid project key.</p>
+                                  </div>
+                              </div>
+                              <button 
+                                  onClick={handleSelectPaidKey}
+                                  className="w-full py-3 bg-zinc-900 hover:bg-zinc-800 text-white font-bold rounded-lg text-sm transition-all shadow-lg shadow-zinc-200 flex items-center justify-center gap-2"
+                              >
+                                  <span>Select Paid API Key</span>
+                                  <ChevronRight size={14} className="opacity-50" />
+                              </button>
+                              <div className="text-center">
+                                  <a href="https://ai.google.dev/pricing" target="_blank" rel="noreferrer" className="text-[10px] text-zinc-400 hover:text-indigo-600 transition-colors">
+                                      View Pricing & Limits
+                                  </a>
+                              </div>
+                          </div>
                       </div>
 
-                      <div className="space-y-2">
-                          <label className="text-sm font-semibold text-slate-700">Manual API Key (Optional)</label>
-                          <div className="flex gap-2">
+                      {/* Manual Key Section */}
+                      <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                               <label className="text-sm font-bold text-zinc-700">Manual API Key</label>
+                               {/* Status Badge */}
+                               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide border ${
+                                  keyStatus === 'valid' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' :
+                                  keyStatus === 'invalid' ? 'bg-red-50 text-red-600 border-red-200' :
+                                  keyStatus === 'validating' ? 'bg-blue-50 text-blue-600 border-blue-200' :
+                                  'bg-zinc-100 text-zinc-400 border-zinc-200'
+                               }`}>
+                                  {keyStatus === 'idle' ? 'Not Set' : keyStatus}
+                               </span>
+                          </div>
+                          
+                          <div className="relative">
                               <input 
                                   type="password" 
                                   value={userApiKey}
                                   onChange={handleApiKeyChange}
-                                  placeholder="Paste key here..."
-                                  className={`flex-1 px-3 py-2 rounded-lg border text-sm outline-none ${keyStatus === 'valid' ? 'border-green-300 bg-green-50' : 'border-slate-300'}`}
+                                  placeholder="Paste your Gemini API key..."
+                                  className={`w-full pl-10 pr-24 py-3 rounded-xl border text-sm outline-none transition-all shadow-sm ${
+                                      keyStatus === 'valid' ? 'border-emerald-500 focus:ring-emerald-200' : 
+                                      keyStatus === 'invalid' ? 'border-red-300 focus:ring-red-100' :
+                                      'border-zinc-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50'
+                                  }`}
                               />
-                              <button onClick={testApiKey} disabled={!userApiKey} className="px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-sm font-medium hover:bg-slate-200">
-                                  {keyStatus === 'validating' ? <Loader2 size={14} className="animate-spin"/> : 'Test'}
+                              <Key className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 w-4 h-4" />
+                              
+                              <button 
+                                  onClick={testApiKey} 
+                                  disabled={!userApiKey || keyStatus === 'validating'}
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-zinc-900 text-white text-xs font-medium rounded-lg hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              >
+                                  {keyStatus === 'validating' ? <Loader2 size={12} className="animate-spin"/> : 'Validate'}
                               </button>
                           </div>
                           {keyStatusMessage && (
-                              <p className={`text-xs ${keyStatus === 'valid' ? 'text-green-600' : 'text-red-500'}`}>{keyStatusMessage}</p>
+                              <div className={`flex items-start gap-2 text-xs p-2 rounded-lg ${keyStatus === 'valid' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>
+                                  {keyStatus === 'valid' ? <CheckCircle size={14} className="shrink-0 mt-0.5"/> : <AlertTriangle size={14} className="shrink-0 mt-0.5"/>}
+                                  {keyStatusMessage}
+                              </div>
                           )}
                       </div>
                   </div>
