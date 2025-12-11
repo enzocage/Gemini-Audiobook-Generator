@@ -1,0 +1,5 @@
+{
+  "name": "Gemini Audiobook Generator",
+  "description": "Convert text into high-quality audiobooks using Gemini's advanced Text-to-Speech capabilities.",
+  "requestFramePermissions": []
+}
