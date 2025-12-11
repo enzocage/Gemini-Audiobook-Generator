@@ -1,23 +1,58 @@
 import { GoogleGenAI, Modality } from "@google/genai";
 import { VoiceName } from "../types";
 
-// Initialize the client
-// NOTE: In a real environment, process.env.API_KEY is replaced by the bundler or runtime environment.
-// The system prompt guarantees this is available.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// State to hold dynamic user API key
+let customApiKey: string | null = null;
+
+export const setCustomApiKey = (key: string | null) => {
+  if (key) {
+    customApiKey = key.trim();
+  } else {
+    customApiKey = null;
+  }
+};
+
+// Helper to get the client instance with the most current key
+const getClient = () => {
+  const key = customApiKey || process.env.API_KEY;
+  if (!key) {
+    // This might happen if env is missing and user hasn't set one
+    throw new Error("API Key is missing. Please provide one in the settings.");
+  }
+  
+  // Debug log (masked) to ensure we are using the expected key
+  const masked = key.length > 4 ? `...${key.slice(-4)}` : 'INVALID';
+  console.log(`[GeminiService] Using API Key ending in: ${masked}`);
+
+  return new GoogleGenAI({ apiKey: key });
+};
+
+// New helper to test the key
+export const validateApiKey = async (key: string): Promise<void> => {
+    const testAi = new GoogleGenAI({ apiKey: key.trim() });
+    try {
+        // Try a very cheap/fast generation to validate the key
+        await testAi.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: { parts: [{ text: 'Ping' }] },
+        });
+    } catch (error: any) {
+        // Re-throw with our normalized error handler to get the nice message
+        handleGeminiError(error);
+    }
+};
 
 const handleGeminiError = (error: any) => {
-  console.error("Gemini API Error:", error);
-
   let message = "An unexpected error occurred.";
   let isRateLimit = false;
 
   // Helper to check for rate limit keywords
   const checkRateLimit = (msg: string) => {
-      return msg.includes('429') || 
-             msg.includes('quota') || 
-             msg.includes('RESOURCE_EXHAUSTED') || 
-             msg.includes('Too Many Requests');
+      const lowerMsg = msg.toLowerCase();
+      return lowerMsg.includes('429') || 
+             lowerMsg.includes('quota') || 
+             lowerMsg.includes('resource_exhausted') || 
+             lowerMsg.includes('too many requests');
   };
 
   if (error instanceof Error) {
@@ -28,7 +63,9 @@ const handleGeminiError = (error: any) => {
         const parsed = JSON.parse(message);
         if (parsed.error) {
           message = parsed.error.message || message;
-          if (parsed.error.code === 429) isRateLimit = true;
+          if (parsed.error.code === 429 || parsed.error.status === 'RESOURCE_EXHAUSTED') {
+             isRateLimit = true;
+          }
         }
       }
     } catch (e) {}
@@ -37,7 +74,9 @@ const handleGeminiError = (error: any) => {
       if ((error as any).error) {
          const errObj = (error as any).error;
          message = errObj.message || JSON.stringify(errObj);
-         if (errObj.code === 429) isRateLimit = true;
+         if (errObj.code === 429 || errObj.status === 'RESOURCE_EXHAUSTED') {
+            isRateLimit = true;
+         }
       } else {
          message = JSON.stringify(error);
       }
@@ -46,8 +85,15 @@ const handleGeminiError = (error: any) => {
   }
 
   // Fallback check on the final message string
-  if (checkRateLimit(message)) {
+  if (!isRateLimit && checkRateLimit(message)) {
       isRateLimit = true;
+  }
+  
+  // Log appropriate level
+  if (isRateLimit) {
+      console.warn("Gemini API Rate Limit Hit:", message);
+  } else {
+      console.error("Gemini API Error:", error);
   }
 
   const enhancedError = new Error(message);
@@ -61,6 +107,7 @@ export const generateSpeechChunk = async (
   model: string
 ): Promise<string> => {
   try {
+    const ai = getClient();
     const response = await ai.models.generateContent({
       model: model,
       contents: {
@@ -97,6 +144,7 @@ export const generateSpeechChunk = async (
 
 export const translateText = async (text: string, targetLanguage: string): Promise<string> => {
   try {
+    const ai = getClient();
     // Basic prompt for translation
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
@@ -105,7 +153,7 @@ export const translateText = async (text: string, targetLanguage: string): Promi
 
     return response.text?.trim() || text;
   } catch (error) {
-    console.error("Translation Error:", error);
+    console.warn("Translation failed (non-fatal):", error);
     // Return original text on failure so user doesn't lose data
     return text;
   }

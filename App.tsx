@@ -1,19 +1,26 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { BookOpen, Play, Download, Loader2, Sparkles, StopCircle, Scissors, Coins, ArrowRight, Volume2, X } from 'lucide-react';
+import { BookOpen, Play, Download, Loader2, Sparkles, StopCircle, Scissors, Coins, ArrowRight, Volume2, X, Settings, Key, CheckCircle, AlertTriangle, ShieldCheck, Tag } from 'lucide-react';
 import { VoiceName, ModelId, AudioChunk, GenerationState, AudioFormat } from './types';
 import { createSmartChunks, base64ToUint8Array, concatenateAudioBuffers, createWavFile, createMp3File } from './utils/audioUtils';
-import { generateSpeechChunk } from './services/geminiService';
+import { generateSpeechChunk, setCustomApiKey, validateApiKey } from './services/geminiService';
 import VoiceSelector from './components/VoiceSelector';
 import ModelSelector from './components/ModelSelector';
 import FormatSelector from './components/FormatSelector';
 import TextInput from './components/TextInput';
 
 const App: React.FC = () => {
+  const [projectName, setProjectName] = useState<string>('my project');
   const [text, setText] = useState<string>('');
   const [voice, setVoice] = useState<VoiceName>(VoiceName.Fenrir);
   const [model, setModel] = useState<ModelId>(ModelId.Flash);
   const [format, setFormat] = useState<AudioFormat>('wav');
   
+  // Settings State
+  const [showSettings, setShowSettings] = useState(false);
+  const [userApiKey, setUserApiKey] = useState('');
+  const [keyStatus, setKeyStatus] = useState<'idle' | 'validating' | 'valid' | 'invalid'>('idle');
+  const [keyStatusMessage, setKeyStatusMessage] = useState('');
+
   // New State for Preview & Selection
   const [previewChunks, setPreviewChunks] = useState<string[]>([]);
   const [startChunkIndex, setStartChunkIndex] = useState<number>(0);
@@ -34,6 +41,45 @@ const App: React.FC = () => {
   const [finalBlob, setFinalBlob] = useState<Blob | null>(null);
   
   const abortRef = useRef<boolean>(false);
+
+  // Initialize Custom Key from LocalStorage
+  useEffect(() => {
+    const savedKey = localStorage.getItem('gemini_api_key');
+    if (savedKey) {
+      setUserApiKey(savedKey);
+      setCustomApiKey(savedKey);
+    }
+  }, []);
+
+  const handleApiKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const key = e.target.value;
+    setUserApiKey(key);
+    // Note: We don't set it in service/storage immediately to avoid half-typed keys breaking things,
+    // but the previous behavior was instant. Let's keep it instant but trimmed.
+    const trimmed = key.trim();
+    setCustomApiKey(trimmed);
+    setKeyStatus('idle'); // Reset validation status on change
+    setKeyStatusMessage('');
+    
+    if (trimmed) {
+      localStorage.setItem('gemini_api_key', trimmed);
+    } else {
+      localStorage.removeItem('gemini_api_key');
+    }
+  };
+
+  const testApiKey = async () => {
+      if (!userApiKey.trim()) return;
+      setKeyStatus('validating');
+      try {
+          await validateApiKey(userApiKey);
+          setKeyStatus('valid');
+          setKeyStatusMessage("Key is valid and active!");
+      } catch (e: any) {
+          setKeyStatus('invalid');
+          setKeyStatusMessage(e.message || "Failed to validate key");
+      }
+  };
 
   // --- COST ESTIMATION LOGIC ---
   const costStats = useMemo(() => {
@@ -194,24 +240,26 @@ const App: React.FC = () => {
       ? previewChunks 
       : createSmartChunks(text, 2000);
 
-    // If startChunkIndex is > 0, we still want to maintain the original IDs
-    // But we only iterate through the slice.
-    
-    // Initialize ALL chunks in state (so UI shows skipped ones as pending/skipped)
+    // Initialize chunks
     const initialAudioChunks: AudioChunk[] = textChunksToProcess.map((t, i) => ({
       id: i,
       text: t,
-      status: i < startChunkIndex ? 'completed' : 'pending' // Mark previous as "completed" or just skipped visually
+      status: i < startChunkIndex ? 'completed' : 'pending'
     }));
 
-    // Actually, let's just process from start index
     setAudioChunks(initialAudioChunks);
     
-    // Total active chunks to generate
     const totalToGenerate = textChunksToProcess.length - startChunkIndex;
     setGenerationState(prev => ({ ...prev, totalChunks: textChunksToProcess.length }));
 
     const collectedBuffers: Uint8Array[] = [];
+    
+    // Adaptive Throttling: Start with 2s delay. If we hit limits, we bump this up.
+    // 2000ms is generally safe for paid tiers. For free tier (15 RPM), we might need 4000ms.
+    // We'll auto-adjust if we hit a 429.
+    let interChunkDelay = 2000;
+
+    const safeProjectName = projectName.trim() || 'my project';
 
     try {
       // Loop starting from the selected index
@@ -228,48 +276,57 @@ const App: React.FC = () => {
 
         let pcmData: Uint8Array | null = null;
         let attempts = 0;
-        const maxRetries = 8; 
+        const maxRetries = 15; 
         
         while(attempts < maxRetries && !pcmData && !abortRef.current) {
              try {
                  const base64Data = await generateSpeechChunk(textChunksToProcess[i], voice, model);
                  pcmData = base64ToUint8Array(base64Data);
+                 // If successful, clear any previous error displayed
+                 setGenerationState(prev => ({ ...prev, error: undefined }));
              } catch (err: any) {
                  const isRateLimit = err?.isRateLimit === true;
                  const errorMessage = err?.message || "Unknown error";
                  
                  console.warn(`Attempt ${attempts + 1} failed for chunk ${i + 1}. Rate Limit Detected: ${isRateLimit}`, errorMessage);
+                 
+                 // ADAPTIVE THROTTLING:
+                 // If we hit a rate limit, permanently slow down the rest of the generation process
+                 if (isRateLimit) {
+                     // 6000ms is 6 seconds. This limits us to ~10 RPM, which is safe for the 15 RPM Free Tier limit.
+                     interChunkDelay = 6000;
+                 }
+
                  attempts++;
+                 
+                 if (!isRateLimit && attempts >= 3) {
+                      throw new Error(`Failed to generate part ${i + 1}. ${errorMessage}`);
+                 }
                  
                  if (attempts >= maxRetries) {
                      const friendlyError = isRateLimit 
-                         ? "Quota exceeded (Rate Limit). Please try again later." 
+                         ? "Quota exceeded (Rate Limit). Aborting after multiple attempts." 
                          : errorMessage;
                      throw new Error(`Failed to generate part ${i + 1}. ${friendlyError}`);
                  }
 
                  // Backoff Strategy
-                 let delay = 2000 * Math.pow(2, attempts); 
+                 let delay = 2000 * Math.pow(1.5, attempts); 
                  
                  if (isRateLimit) {
-                     // Aggressive backoff for rate limits: 15s start + linear increase
-                     delay = 15000 + (attempts * 5000); 
+                     delay = 10000 + (attempts * 5000); 
                      setGenerationState(prev => ({ 
                          ...prev, 
-                         error: `Rate limit hit. Pausing for ${delay/1000}s before retrying chunk ${i + 1}...` 
+                         error: `Rate limit hit. Cooling down for ${delay/1000}s... (Safe Mode Activated)` 
                      }));
                  } else {
                      setGenerationState(prev => ({ 
                          ...prev, 
-                         error: `Error encountered. Retrying chunk ${i + 1} in ${delay/1000}s...` 
+                         error: `Error encountered. Retrying chunk ${i + 1} in ${Math.round(delay/1000)}s...` 
                      }));
                  }
 
                  await new Promise(r => setTimeout(r, delay));
-                 // Clear error display if we are retrying
-                 if (isRateLimit || generationState.error) {
-                    setGenerationState(prev => ({ ...prev, error: undefined }));
-                 }
              }
         }
 
@@ -281,15 +338,24 @@ const App: React.FC = () => {
 
             try {
                 const chunkBlob = format === 'wav' ? createWavFile(pcmData) : createMp3File(pcmData);
-                const chunkFilename = `audiobook_chunk_${i + 1}.${format}`;
+                const chunkFilename = `${safeProjectName}_chunk_${i + 1}.${format}`;
                 downloadBlob(chunkBlob, chunkFilename);
             } catch (downloadErr) {
                 console.error("Failed to auto-download chunk", downloadErr);
             }
         }
 
+        // Inter-chunk delay to respect quotas
         if (i < textChunksToProcess.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // Show pacing message if delay is significant (Safe Mode)
+            if (interChunkDelay > 3000) {
+                setGenerationState(prev => ({ ...prev, error: `Pacing requests to avoid limits (${interChunkDelay/1000}s wait)...` }));
+            }
+            await new Promise(resolve => setTimeout(resolve, interChunkDelay));
+            // Clear message if it was just pacing
+            if (interChunkDelay > 3000) {
+                 setGenerationState(prev => ({ ...prev, error: undefined }));
+            }
         }
       }
 
@@ -305,7 +371,7 @@ const App: React.FC = () => {
           setGenerationState(prev => ({ ...prev, isGenerating: false, progress: 100 }));
 
           try {
-             const finalFilename = `audiobook_complete.${format}`;
+             const finalFilename = `${safeProjectName}_complete.${format}`;
              downloadBlob(blob, finalFilename);
           } catch (downloadErr) {
              console.error("Failed to auto-download final file", downloadErr);
@@ -322,7 +388,7 @@ const App: React.FC = () => {
           error: error instanceof Error ? error.message : "An unexpected error occurred" 
       }));
     }
-  }, [text, voice, model, format, downloadBlob, previewChunks, startChunkIndex, generationState.error]);
+  }, [text, voice, model, format, downloadBlob, previewChunks, startChunkIndex, projectName]);
 
   const handleStop = () => {
       abortRef.current = true;
@@ -331,7 +397,8 @@ const App: React.FC = () => {
 
   const downloadFinalAudio = () => {
       if (!finalBlob) return;
-      downloadBlob(finalBlob, `audiobook-complete-${new Date().getTime()}.${format}`);
+      const safeProjectName = projectName.trim() || 'my project';
+      downloadBlob(finalBlob, `${safeProjectName}-complete-${new Date().getTime()}.${format}`);
   };
 
   // Compute number of ready chunks
@@ -347,21 +414,80 @@ const App: React.FC = () => {
                 <div className="bg-blue-600 p-2 rounded-lg text-white">
                      <BookOpen size={20} />
                 </div>
-                <h1 className="text-xl font-bold text-slate-800 tracking-tight">Gemini Audiobook</h1>
+                <h1 className="text-xl font-bold text-slate-800 tracking-tight hidden sm:block">Gemini Audiobook</h1>
+                <h1 className="text-xl font-bold text-slate-800 tracking-tight sm:hidden">Audiobook</h1>
             </div>
             <div className="flex items-center gap-3">
-                 <div className="hidden sm:flex items-center gap-2 text-xs font-mono bg-slate-100 text-slate-600 px-3 py-1.5 rounded-full border border-slate-200">
+                 <div className="hidden md:flex items-center gap-2 text-xs font-mono bg-slate-100 text-slate-600 px-3 py-1.5 rounded-full border border-slate-200">
                     <Coins size={12} className="text-amber-500"/>
                     <span>Est. Cost: ${costStats.cost}</span>
                     <span className="text-slate-300">|</span>
                     <span>{costStats.tokens.toLocaleString()} toks</span>
                  </div>
-                <div className="text-sm font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
-                    Powered by Gemini 2.5
-                </div>
+                 
+                 <button 
+                    onClick={() => setShowSettings(!showSettings)}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${userApiKey ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-white text-slate-600 border-slate-200'}`}
+                 >
+                     <Settings size={14} />
+                     <span>{userApiKey ? 'Custom Key Active' : 'API Settings'}</span>
+                 </button>
             </div>
         </div>
       </header>
+
+      {/* Settings Panel */}
+      {showSettings && (
+          <div className="bg-slate-100 border-b border-slate-200 animate-in slide-in-from-top-2">
+              <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                  <div className="flex flex-col gap-2">
+                      <label className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                          <Key size={16} />
+                          Custom Gemini API Key
+                      </label>
+                      <div className="flex gap-2 items-start">
+                          <div className="flex-1 flex flex-col gap-1">
+                              <input 
+                                  type="password" 
+                                  value={userApiKey}
+                                  onChange={handleApiKeyChange}
+                                  placeholder="Enter your AIza... key here"
+                                  className={`
+                                    w-full px-4 py-2 rounded-lg border focus:ring-2 outline-none text-sm font-mono transition-colors
+                                    ${keyStatus === 'valid' ? 'border-green-300 focus:border-green-500 focus:ring-green-100' : ''}
+                                    ${keyStatus === 'invalid' ? 'border-red-300 focus:border-red-500 focus:ring-red-100' : ''}
+                                    ${keyStatus === 'idle' || keyStatus === 'validating' ? 'border-slate-300 focus:border-blue-500 focus:ring-blue-100' : ''}
+                                  `}
+                              />
+                              {keyStatusMessage && (
+                                  <span className={`text-xs flex items-center gap-1 ${keyStatus === 'valid' ? 'text-green-600' : 'text-red-600'}`}>
+                                      {keyStatus === 'valid' ? <CheckCircle size={12}/> : <AlertTriangle size={12}/>}
+                                      {keyStatusMessage}
+                                  </span>
+                              )}
+                          </div>
+                          <button 
+                              onClick={testApiKey}
+                              disabled={!userApiKey || keyStatus === 'validating'}
+                              className="px-4 py-2 bg-blue-600 border border-blue-700 rounded-lg text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                          >
+                              {keyStatus === 'validating' ? <Loader2 size={16} className="animate-spin" /> : "Test Key"}
+                          </button>
+                          <button 
+                              onClick={() => setShowSettings(false)}
+                              className="px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
+                          >
+                              Close
+                          </button>
+                      </div>
+                      <p className="text-xs text-amber-600 font-medium mt-1">
+                          Warning: Using your own key means you will be billed for usage on your Google Cloud account. 
+                          Check your billing limits. Extra costs may apply.
+                      </p>
+                  </div>
+              </div>
+          </div>
+      )}
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         
@@ -397,6 +523,21 @@ const App: React.FC = () => {
             />
 
             <div className="space-y-4">
+                <div className="flex flex-col gap-2">
+                    <label className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                        <Tag className="w-4 h-4" />
+                        Project Name
+                    </label>
+                    <input 
+                        type="text" 
+                        value={projectName}
+                        onChange={(e) => setProjectName(e.target.value)}
+                        disabled={generationState.isGenerating}
+                        placeholder="my project"
+                        className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none text-sm transition-all text-slate-700 placeholder:text-slate-400"
+                    />
+                </div>
+
                 <TextInput 
                     text={text} 
                     onTextChange={setText} 
@@ -414,6 +555,12 @@ const App: React.FC = () => {
                         <div>
                              ~${costStats.cost} USD
                         </div>
+                        {userApiKey && (
+                            <div className="flex items-center gap-1 text-blue-600 font-medium">
+                                <ShieldCheck className="w-3 h-3" />
+                                Custom Key Active
+                            </div>
+                        )}
                      </div>
                      <button
                         onClick={handlePreviewChunks}
@@ -479,7 +626,14 @@ const App: React.FC = () => {
 
             {/* Error Message */}
             {generationState.error && (
-                <div className="bg-red-50 text-red-700 p-4 rounded-lg border border-red-200 text-sm animate-pulse">
+                <div className={`
+                    p-4 rounded-lg border text-sm animate-pulse flex items-center gap-2
+                    ${generationState.error.includes("Pacing") || generationState.error.includes("Cooling")
+                        ? 'bg-amber-50 text-amber-700 border-amber-200'
+                        : 'bg-red-50 text-red-700 border-red-200'
+                    }
+                `}>
+                    {generationState.error.includes("Pacing") ? <Loader2 className="w-4 h-4 animate-spin"/> : <AlertTriangle className="w-4 h-4"/>}
                     <strong>Status:</strong> {generationState.error}
                 </div>
             )}
