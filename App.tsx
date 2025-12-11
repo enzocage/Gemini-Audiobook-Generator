@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { BookOpen, Play, Download, Loader2, Sparkles, StopCircle, Scissors, Coins, ArrowRight, Volume2, X, Settings, Key, CheckCircle, AlertTriangle, ShieldCheck, Tag } from 'lucide-react';
+import { BookOpen, Play, Download, Loader2, Sparkles, StopCircle, Scissors, Coins, ArrowRight, Volume2, X, Settings, Key, CheckCircle, AlertTriangle, ShieldCheck, Tag, Menu, LayoutTemplate } from 'lucide-react';
 import { VoiceName, ModelId, AudioChunk, GenerationState, AudioFormat } from './types';
 import { createSmartChunks, base64ToUint8Array, concatenateAudioBuffers, createWavFile, createMp3File } from './utils/audioUtils';
 import { generateSpeechChunk, setCustomApiKey, validateApiKey } from './services/geminiService';
@@ -9,7 +9,7 @@ import FormatSelector from './components/FormatSelector';
 import TextInput from './components/TextInput';
 
 const App: React.FC = () => {
-  const [projectName, setProjectName] = useState<string>('my project');
+  const [projectName, setProjectName] = useState<string>('My Audiobook');
   const [text, setText] = useState<string>('');
   const [voice, setVoice] = useState<VoiceName>(VoiceName.Fenrir);
   const [model, setModel] = useState<ModelId>(ModelId.Flash);
@@ -54,11 +54,9 @@ const App: React.FC = () => {
   const handleApiKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const key = e.target.value;
     setUserApiKey(key);
-    // Note: We don't set it in service/storage immediately to avoid half-typed keys breaking things,
-    // but the previous behavior was instant. Let's keep it instant but trimmed.
     const trimmed = key.trim();
     setCustomApiKey(trimmed);
-    setKeyStatus('idle'); // Reset validation status on change
+    setKeyStatus('idle'); 
     setKeyStatusMessage('');
     
     if (trimmed) {
@@ -88,23 +86,23 @@ const App: React.FC = () => {
     const estimatedTokens = Math.ceil(charCount / 4);
     
     // Pricing (Estimated based on public docs per 1M tokens)
-    // Flash: ~$0.10 / 1M input (Text) | Output is complex, assuming roughly equal audio generation cost factor for estimation
-    // Pro: ~$1.25 / 1M input
     const pricingPerMillion = model === ModelId.Flash ? 0.10 : 1.25;
     const estimatedCost = (estimatedTokens / 1_000_000) * pricingPerMillion;
+    
+    // Rough estimate: 150 words per minute ~ 900 chars per minute
+    const estimatedMinutes = charCount / 900;
 
     return {
       tokens: estimatedTokens,
-      cost: estimatedCost.toFixed(6), // Show high precision for small texts
+      cost: estimatedCost.toFixed(6),
+      minutes: estimatedMinutes.toFixed(1),
       currency: '$'
     };
   }, [text, model]);
 
-  // Clear preview if text changes significantly? 
-  // For now, we keep it but reset start index if text changes to avoid out of bounds
   useEffect(() => {
     setStartChunkIndex(0);
-    setPreviewChunks([]); // Clear chunks when text changes to force re-preview
+    setPreviewChunks([]); 
   }, [text]);
 
   const handlePreviewChunks = () => {
@@ -143,32 +141,27 @@ const App: React.FC = () => {
     if (!generationState.isGenerating && audioChunks.length > 0 && audioChunks.some(c => c.status === 'completed')) {
         const blob = generateBlobFromChunks(audioChunks, format);
         setFinalBlob(blob);
-        setPreviewUrl(null); // Clear preview when final is ready
+        setPreviewUrl(null); 
         setPreviewChunkCount(0);
     }
   }, [format, audioChunks, generationState.isGenerating, generateBlobFromChunks]);
 
-  // Clean up preview URL
   useEffect(() => {
       return () => {
           if (previewUrl) URL.revokeObjectURL(previewUrl);
       };
   }, [previewUrl]);
 
-  // Auto-resume logic
   useEffect(() => {
     if (previewUrl && autoResumeRef.current.shouldResume && audioRef.current) {
         const { startTime } = autoResumeRef.current;
         const player = audioRef.current;
-        
-        // Small timeout to ensure DOM is ready with new source
         const timer = setTimeout(() => {
             if (Number.isFinite(startTime)) {
                 player.currentTime = startTime;
             }
             player.play().catch(e => console.warn("Auto-resume playback interrupted", e));
         }, 50);
-        
         autoResumeRef.current = { shouldResume: false, startTime: 0 };
         return () => clearTimeout(timer);
     }
@@ -178,7 +171,6 @@ const App: React.FC = () => {
       const completedChunks = audioChunks.filter(c => c.status === 'completed' && c.data);
       if (completedChunks.length === 0) return;
 
-      // Use WAV for preview as it's faster to generate (no encoding overhead)
       const buffer = concatenateAudioBuffers(completedChunks.map(c => c.data!));
       const blob = createWavFile(buffer);
       
@@ -204,16 +196,9 @@ const App: React.FC = () => {
   };
 
   const handleAudioEnded = () => {
-      // Check if there are more chunks available than currently playing
       const completedCount = audioChunks.filter(c => c.status === 'completed' && c.data).length;
-      
       if (completedCount > previewChunkCount) {
-          // Calculate current duration (which is the end of the previous file)
-          // We use the player's duration because we are at the end
           const currentDuration = audioRef.current?.duration || 0;
-          
-          // Regenerate and resume
-          console.log(`Auto-switching to new chunks. Resuming at ${currentDuration}s`);
           updatePreviewSource(true, currentDuration);
       }
   };
@@ -221,7 +206,6 @@ const App: React.FC = () => {
   const handleGenerate = useCallback(async () => {
     if (!text.trim()) return;
 
-    // Reset State
     setFinalBlob(null);
     setAudioChunks([]);
     setPreviewUrl(null);
@@ -235,12 +219,10 @@ const App: React.FC = () => {
     });
     abortRef.current = false;
 
-    // Use existing preview chunks if available, otherwise generate them
     let textChunksToProcess = previewChunks.length > 0 
       ? previewChunks 
       : createSmartChunks(text, 2000);
 
-    // Initialize chunks
     const initialAudioChunks: AudioChunk[] = textChunksToProcess.map((t, i) => ({
       id: i,
       text: t,
@@ -253,16 +235,10 @@ const App: React.FC = () => {
     setGenerationState(prev => ({ ...prev, totalChunks: textChunksToProcess.length }));
 
     const collectedBuffers: Uint8Array[] = [];
-    
-    // Adaptive Throttling: Start with 2s delay. If we hit limits, we bump this up.
-    // 2000ms is generally safe for paid tiers. For free tier (15 RPM), we might need 4000ms.
-    // We'll auto-adjust if we hit a 429.
     let interChunkDelay = 2000;
-
-    const safeProjectName = projectName.trim() || 'my project';
+    const safeProjectName = projectName.trim() || 'audiobook';
 
     try {
-      // Loop starting from the selected index
       for (let i = startChunkIndex; i < textChunksToProcess.length; i++) {
         if (abortRef.current) break;
 
@@ -282,18 +258,14 @@ const App: React.FC = () => {
              try {
                  const base64Data = await generateSpeechChunk(textChunksToProcess[i], voice, model);
                  pcmData = base64ToUint8Array(base64Data);
-                 // If successful, clear any previous error displayed
                  setGenerationState(prev => ({ ...prev, error: undefined }));
              } catch (err: any) {
                  const isRateLimit = err?.isRateLimit === true;
                  const errorMessage = err?.message || "Unknown error";
                  
-                 console.warn(`Attempt ${attempts + 1} failed for chunk ${i + 1}. Rate Limit Detected: ${isRateLimit}`, errorMessage);
+                 console.warn(`Attempt ${attempts + 1} failed for chunk ${i + 1}.`, errorMessage);
                  
-                 // ADAPTIVE THROTTLING:
-                 // If we hit a rate limit, permanently slow down the rest of the generation process
                  if (isRateLimit) {
-                     // 6000ms is 6 seconds. This limits us to ~10 RPM, which is safe for the 15 RPM Free Tier limit.
                      interChunkDelay = 6000;
                  }
 
@@ -305,27 +277,24 @@ const App: React.FC = () => {
                  
                  if (attempts >= maxRetries) {
                      const friendlyError = isRateLimit 
-                         ? "Quota exceeded (Rate Limit). Aborting after multiple attempts." 
+                         ? "Quota exceeded. Aborting." 
                          : errorMessage;
                      throw new Error(`Failed to generate part ${i + 1}. ${friendlyError}`);
                  }
 
-                 // Backoff Strategy
                  let delay = 2000 * Math.pow(1.5, attempts); 
-                 
                  if (isRateLimit) {
                      delay = 10000 + (attempts * 5000); 
                      setGenerationState(prev => ({ 
                          ...prev, 
-                         error: `Rate limit hit. Cooling down for ${delay/1000}s... (Safe Mode Activated)` 
+                         error: `Rate limit hit. Cooling down for ${delay/1000}s...` 
                      }));
                  } else {
                      setGenerationState(prev => ({ 
                          ...prev, 
-                         error: `Error encountered. Retrying chunk ${i + 1} in ${Math.round(delay/1000)}s...` 
+                         error: `Error encountered. Retrying in ${Math.round(delay/1000)}s...` 
                      }));
                  }
-
                  await new Promise(r => setTimeout(r, delay));
              }
         }
@@ -335,7 +304,6 @@ const App: React.FC = () => {
         if (pcmData) {
             collectedBuffers.push(pcmData);
             setAudioChunks(prev => prev.map(c => c.id === i ? { ...c, status: 'completed', data: pcmData! } : c));
-
             try {
                 const chunkBlob = format === 'wav' ? createWavFile(pcmData) : createMp3File(pcmData);
                 const chunkFilename = `${safeProjectName}_chunk_${i + 1}.${format}`;
@@ -345,14 +313,11 @@ const App: React.FC = () => {
             }
         }
 
-        // Inter-chunk delay to respect quotas
         if (i < textChunksToProcess.length - 1) {
-            // Show pacing message if delay is significant (Safe Mode)
             if (interChunkDelay > 3000) {
-                setGenerationState(prev => ({ ...prev, error: `Pacing requests to avoid limits (${interChunkDelay/1000}s wait)...` }));
+                setGenerationState(prev => ({ ...prev, error: `Pacing requests (${interChunkDelay/1000}s)...` }));
             }
             await new Promise(resolve => setTimeout(resolve, interChunkDelay));
-            // Clear message if it was just pacing
             if (interChunkDelay > 3000) {
                  setGenerationState(prev => ({ ...prev, error: undefined }));
             }
@@ -369,13 +334,6 @@ const App: React.FC = () => {
           }
           setFinalBlob(blob);
           setGenerationState(prev => ({ ...prev, isGenerating: false, progress: 100 }));
-
-          try {
-             const finalFilename = `${safeProjectName}_complete.${format}`;
-             downloadBlob(blob, finalFilename);
-          } catch (downloadErr) {
-             console.error("Failed to auto-download final file", downloadErr);
-          }
       } else {
           setGenerationState(prev => ({ ...prev, isGenerating: false }));
       }
@@ -397,409 +355,355 @@ const App: React.FC = () => {
 
   const downloadFinalAudio = () => {
       if (!finalBlob) return;
-      const safeProjectName = projectName.trim() || 'my project';
-      downloadBlob(finalBlob, `${safeProjectName}-complete-${new Date().getTime()}.${format}`);
+      const safeProjectName = projectName.trim() || 'audiobook';
+      downloadBlob(finalBlob, `${safeProjectName}_complete.${format}`);
   };
 
-  // Compute number of ready chunks
   const readyChunksCount = useMemo(() => {
       return audioChunks.filter(c => c.status === 'completed' && c.data).length;
   }, [audioChunks]);
 
+  const handleSelectPaidKey = async () => {
+      if (typeof window.aistudio?.openSelectKey === 'function') {
+          try {
+              // Reset manual key first to avoid confusion
+              setUserApiKey('');
+              setCustomApiKey(null);
+              setKeyStatus('idle');
+              
+              await window.aistudio.openSelectKey();
+              // If successful, user has a key in process.env context implicitly via the tool
+              // We rely on the environment now.
+              alert("Paid API Key selected successfully!");
+          } catch (e) {
+              console.error(e);
+          }
+      } else {
+          alert("Key selection tool not available.");
+      }
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50 pb-20">
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-                <div className="bg-blue-600 p-2 rounded-lg text-white">
-                     <BookOpen size={20} />
+    <div className="h-screen bg-slate-900 text-slate-100 flex overflow-hidden font-sans selection:bg-blue-500/30">
+      
+      {/* --- LEFT SIDEBAR: STUDIO CONTROLS --- */}
+      <aside className="w-80 bg-slate-950 border-r border-slate-800 flex flex-col z-20 shadow-xl flex-shrink-0 overflow-y-auto">
+        
+        {/* Header */}
+        <div className="h-16 flex items-center gap-3 px-6 border-b border-slate-800 bg-slate-950 sticky top-0 z-10">
+           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg shadow-blue-900/50">
+                <BookOpen size={18} />
+           </div>
+           <div>
+               <h1 className="text-base font-bold text-white tracking-tight leading-none">Gemini Studio</h1>
+               <span className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold">Audiobook Gen</span>
+           </div>
+        </div>
+
+        <div className="p-6 space-y-8">
+            {/* Model & Format Group */}
+            <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                    <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Configuration</h2>
+                    <button 
+                        onClick={() => setShowSettings(true)}
+                        className={`p-1.5 rounded-md transition-colors ${userApiKey ? 'text-green-400 bg-green-400/10' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
+                    >
+                        <Settings size={14} />
+                    </button>
                 </div>
-                <h1 className="text-xl font-bold text-slate-800 tracking-tight hidden sm:block">Gemini Audiobook</h1>
-                <h1 className="text-xl font-bold text-slate-800 tracking-tight sm:hidden">Audiobook</h1>
+                
+                <div className="space-y-4">
+                     <ModelSelector 
+                        selectedModel={model}
+                        onModelChange={setModel}
+                        disabled={generationState.isGenerating}
+                     />
+                     <FormatSelector 
+                        selectedFormat={format}
+                        onFormatChange={setFormat}
+                        disabled={generationState.isGenerating}
+                     />
+                </div>
             </div>
-            <div className="flex items-center gap-3">
-                 <div className="hidden md:flex items-center gap-2 text-xs font-mono bg-slate-100 text-slate-600 px-3 py-1.5 rounded-full border border-slate-200">
-                    <Coins size={12} className="text-amber-500"/>
-                    <span>Est. Cost: ${costStats.cost}</span>
-                    <span className="text-slate-300">|</span>
-                    <span>{costStats.tokens.toLocaleString()} toks</span>
+
+            <div className="w-full h-px bg-slate-800/50" />
+
+            {/* Voice Group */}
+            <div className="space-y-4">
+                <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Cast</h2>
+                <VoiceSelector 
+                    selectedVoice={voice} 
+                    onVoiceChange={setVoice} 
+                    disabled={generationState.isGenerating}
+                    model={model}
+                />
+            </div>
+            
+            <div className="w-full h-px bg-slate-800/50" />
+
+            {/* Stats */}
+            <div className="bg-slate-900 rounded-lg p-4 border border-slate-800 space-y-3">
+                 <div className="flex justify-between items-center text-xs">
+                     <span className="text-slate-400">Tokens</span>
+                     <span className="font-mono text-slate-200">{costStats.tokens.toLocaleString()}</span>
                  </div>
-                 
-                 <button 
-                    onClick={() => setShowSettings(!showSettings)}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${userApiKey ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-white text-slate-600 border-slate-200'}`}
+                 <div className="flex justify-between items-center text-xs">
+                     <span className="text-slate-400">Est. Duration</span>
+                     <span className="font-mono text-slate-200">~{costStats.minutes} min</span>
+                 </div>
+                 <div className="flex justify-between items-center text-xs pt-2 border-t border-slate-800/50">
+                     <span className="text-slate-400">Est. Cost</span>
+                     <span className="font-mono text-amber-400">${costStats.cost}</span>
+                 </div>
+            </div>
+
+        </div>
+      </aside>
+
+      {/* --- RIGHT MAIN AREA: MANUSCRIPT CANVAS --- */}
+      <main className="flex-1 flex flex-col bg-slate-100 relative overflow-hidden">
+        
+        {/* Top Bar (Project Name & Actions) */}
+        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 flex-shrink-0 z-10">
+            <div className="flex items-center gap-3 w-1/2">
+                <LayoutTemplate className="text-slate-300 w-5 h-5" />
+                <input 
+                    type="text" 
+                    value={projectName}
+                    onChange={(e) => setProjectName(e.target.value)}
+                    className="text-lg font-semibold text-slate-800 bg-transparent outline-none placeholder:text-slate-300 w-full hover:bg-slate-50 focus:bg-slate-50 rounded px-2 -ml-2 transition-colors truncate"
+                    placeholder="Untitled Project"
+                />
+            </div>
+
+            <div className="flex items-center gap-3">
+                 {/* Generation Progress Indicator (Top Right) */}
+                 {generationState.isGenerating && (
+                     <div className="flex items-center gap-3 mr-4">
+                         <div className="flex flex-col items-end">
+                             <span className="text-xs font-bold text-blue-600 uppercase">Generating</span>
+                             <span className="text-[10px] text-slate-400">Chunk {generationState.currentChunkIndex} / {generationState.totalChunks}</span>
+                         </div>
+                         <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
+                     </div>
+                 )}
+
+                 <button
+                    onClick={handlePreviewChunks}
+                    disabled={!text || generationState.isGenerating}
+                    className="flex items-center gap-2 px-4 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg text-sm font-medium transition-all"
                  >
-                     <Settings size={14} />
-                     <span>{userApiKey ? 'Custom Key Active' : 'API Settings'}</span>
+                    <Scissors className="w-4 h-4" />
+                    <span>Chunk Preview</span>
                  </button>
+
+                 {generationState.isGenerating ? (
+                    <button
+                        onClick={handleStop}
+                        className="flex items-center gap-2 px-6 py-2.5 bg-red-50 text-red-600 font-semibold rounded-lg hover:bg-red-100 border border-red-200 transition-colors shadow-sm"
+                    >
+                        <StopCircle size={18} />
+                        Stop
+                    </button>
+                 ) : (
+                    <button
+                        onClick={handleGenerate}
+                        disabled={!text}
+                        className={`
+                            flex items-center gap-2 px-6 py-2.5 rounded-lg font-semibold text-white shadow-md shadow-blue-200 transition-all
+                            ${!text 
+                                ? 'bg-slate-300 cursor-not-allowed shadow-none' 
+                                : 'bg-blue-600 hover:bg-blue-700 hover:translate-y-[-1px]'
+                            }
+                        `}
+                    >
+                        <Sparkles size={18} />
+                        {startChunkIndex > 0 ? `Resume from #${startChunkIndex + 1}` : 'Generate Audio'}
+                    </button>
+                 )}
+            </div>
+        </header>
+
+        {/* Scrollable Canvas Area */}
+        <div className="flex-1 overflow-y-auto p-8 relative scroll-smooth">
+            <div className="max-w-3xl mx-auto space-y-6 pb-32">
+                
+                {/* Script Input (Visualized as Paper) */}
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 min-h-[600px] p-10 relative group transition-shadow hover:shadow-md">
+                     <TextInput 
+                        text={text} 
+                        onTextChange={setText} 
+                        disabled={generationState.isGenerating}
+                     />
+                </div>
+
+                {/* Chunk Visualization (Timeline) */}
+                {previewChunks.length > 0 && (
+                    <div className="space-y-3 pt-6 animate-in fade-in slide-in-from-bottom-4">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Processing Timeline</h3>
+                            <span className="text-xs text-slate-400">{previewChunks.length} Segments</span>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 gap-2">
+                            {previewChunks.map((chunkText, idx) => {
+                                const isCompleted = idx < startChunkIndex || (audioChunks[idx]?.status === 'completed');
+                                const isGenerating = audioChunks[idx]?.status === 'generating';
+                                const isPending = !isCompleted && !isGenerating;
+                                const isSelected = idx === startChunkIndex;
+
+                                return (
+                                    <div 
+                                        key={idx}
+                                        onClick={() => !generationState.isGenerating && setStartChunkIndex(idx)}
+                                        className={`
+                                            flex items-start gap-4 p-3 rounded-lg border transition-all cursor-pointer select-none
+                                            ${isSelected ? 'bg-blue-50/50 border-blue-400 ring-1 ring-blue-400/30' : 'bg-white border-slate-200 hover:border-slate-300'}
+                                            ${isGenerating ? 'border-blue-500 bg-blue-50' : ''}
+                                            ${isCompleted && !isSelected ? 'opacity-60 bg-slate-50' : ''}
+                                        `}
+                                    >
+                                        <div className={`
+                                            w-8 h-8 rounded-md flex items-center justify-center text-xs font-bold shrink-0 transition-colors
+                                            ${isCompleted ? 'bg-green-100 text-green-700' : ''}
+                                            ${isGenerating ? 'bg-blue-600 text-white animate-pulse' : ''}
+                                            ${isPending && !isSelected ? 'bg-slate-100 text-slate-500' : ''}
+                                            ${isSelected && !isGenerating ? 'bg-blue-600 text-white' : ''}
+                                        `}>
+                                            {isCompleted ? <CheckCircle size={14}/> : (idx + 1)}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-sm text-slate-600 font-serif leading-relaxed line-clamp-2">{chunkText}</p>
+                                        </div>
+                                        {isSelected && !generationState.isGenerating && (
+                                            <span className="text-[10px] uppercase font-bold text-blue-600 bg-blue-100 px-2 py-1 rounded">Start Here</span>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
-      </header>
 
-      {/* Settings Panel */}
-      {showSettings && (
-          <div className="bg-slate-100 border-b border-slate-200 animate-in slide-in-from-top-2">
-              <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-                  <div className="flex flex-col gap-2">
-                      <label className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-                          <Key size={16} />
-                          Custom Gemini API Key
-                      </label>
-                      <div className="flex gap-2 items-start">
-                          <div className="flex-1 flex flex-col gap-1">
-                              <input 
-                                  type="password" 
-                                  value={userApiKey}
-                                  onChange={handleApiKeyChange}
-                                  placeholder="Enter your AIza... key here"
-                                  className={`
-                                    w-full px-4 py-2 rounded-lg border focus:ring-2 outline-none text-sm font-mono transition-colors
-                                    ${keyStatus === 'valid' ? 'border-green-300 focus:border-green-500 focus:ring-green-100' : ''}
-                                    ${keyStatus === 'invalid' ? 'border-red-300 focus:border-red-500 focus:ring-red-100' : ''}
-                                    ${keyStatus === 'idle' || keyStatus === 'validating' ? 'border-slate-300 focus:border-blue-500 focus:ring-blue-100' : ''}
-                                  `}
-                              />
-                              {keyStatusMessage && (
-                                  <span className={`text-xs flex items-center gap-1 ${keyStatus === 'valid' ? 'text-green-600' : 'text-red-600'}`}>
-                                      {keyStatus === 'valid' ? <CheckCircle size={12}/> : <AlertTriangle size={12}/>}
-                                      {keyStatusMessage}
-                                  </span>
-                              )}
-                          </div>
-                          <button 
-                              onClick={testApiKey}
-                              disabled={!userApiKey || keyStatus === 'validating'}
-                              className="px-4 py-2 bg-blue-600 border border-blue-700 rounded-lg text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                          >
-                              {keyStatus === 'validating' ? <Loader2 size={16} className="animate-spin" /> : "Test Key"}
-                          </button>
-                          <button 
-                              onClick={() => setShowSettings(false)}
-                              className="px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
-                          >
-                              Close
-                          </button>
-                      </div>
-                      <p className="text-xs text-amber-600 font-medium mt-1">
-                          Warning: Using your own key means you will be billed for usage on your Google Cloud account. 
-                          Check your billing limits. Extra costs may apply.
-                      </p>
-                  </div>
-              </div>
-          </div>
-      )}
-
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        
-        {/* Intro Section */}
-        <section className="text-center space-y-2 max-w-2xl mx-auto mb-8">
-            <h2 className="text-3xl font-bold text-slate-900">Turn Text into Lifelike Speech</h2>
-            <p className="text-slate-500">
-                Generate high-quality audiobooks from text using Google's latest AI models. 
-                Select a model and voice, paste your script, and let Gemini narrate for you.
-            </p>
-        </section>
-
-        {/* Controls */}
-        <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:p-8 space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <ModelSelector 
-                    selectedModel={model}
-                    onModelChange={setModel}
-                    disabled={generationState.isGenerating}
-                />
-                <FormatSelector 
-                    selectedFormat={format}
-                    onFormatChange={setFormat}
-                    disabled={generationState.isGenerating}
-                />
-            </div>
-
-            <VoiceSelector 
-                selectedVoice={voice} 
-                onVoiceChange={setVoice} 
-                disabled={generationState.isGenerating}
-                model={model}
-            />
-
-            <div className="space-y-4">
-                <div className="flex flex-col gap-2">
-                    <label className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-                        <Tag className="w-4 h-4" />
-                        Project Name
-                    </label>
-                    <input 
-                        type="text" 
-                        value={projectName}
-                        onChange={(e) => setProjectName(e.target.value)}
-                        disabled={generationState.isGenerating}
-                        placeholder="my project"
-                        className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none text-sm transition-all text-slate-700 placeholder:text-slate-400"
-                    />
-                </div>
-
-                <TextInput 
-                    text={text} 
-                    onTextChange={setText} 
-                    disabled={generationState.isGenerating}
-                />
+        {/* --- BOTTOM PLAYER DECK (Sticky) --- */}
+        {(finalBlob || previewUrl || generationState.isGenerating) && (
+            <div className="h-20 bg-white border-t border-slate-200 flex items-center px-6 gap-6 shadow-2xl z-30 flex-shrink-0 animate-in slide-in-from-bottom-full duration-500">
                 
-                {/* Chunk Preview Controls */}
-                <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-slate-50 rounded-xl border border-slate-200">
-                     <div className="flex items-center gap-4 text-sm text-slate-600">
-                        <div className="flex items-center gap-2">
-                             <Coins className="w-4 h-4 text-amber-500" />
-                             <span className="font-semibold">Est. {costStats.tokens.toLocaleString()} Tokens</span>
+                {/* Status / Error Message Area */}
+                <div className="w-1/4 min-w-[200px]">
+                    {generationState.error ? (
+                        <div className="flex items-center gap-2 text-amber-600 text-xs font-medium">
+                            <AlertTriangle size={14} />
+                            <span className="line-clamp-1" title={generationState.error}>{generationState.error}</span>
+                            {generationState.error.includes("Rate limit") && (
+                                <button onClick={() => setShowSettings(true)} className="underline hover:text-amber-800">Upgrade</button>
+                            )}
                         </div>
-                        <span className="text-slate-300">|</span>
-                        <div>
-                             ~${costStats.cost} USD
+                    ) : (finalBlob ? (
+                        <div className="flex items-center gap-2 text-green-600">
+                             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                             <span className="text-sm font-bold">Generation Complete</span>
                         </div>
-                        {userApiKey && (
-                            <div className="flex items-center gap-1 text-blue-600 font-medium">
-                                <ShieldCheck className="w-3 h-3" />
-                                Custom Key Active
-                            </div>
-                        )}
-                     </div>
-                     <button
-                        onClick={handlePreviewChunks}
-                        disabled={!text || generationState.isGenerating}
-                        className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 shadow-sm rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50"
-                     >
-                        <Scissors className="w-4 h-4" />
-                        Chunk Now (Preview)
-                     </button>
+                    ) : (
+                        <div className="flex items-center gap-2 text-blue-600">
+                             <Loader2 size={14} className="animate-spin" />
+                             <span className="text-xs font-medium uppercase tracking-wide">Processing Audio...</span>
+                        </div>
+                    ))}
                 </div>
-            </div>
 
-            {/* Chunk List Selection */}
-            {previewChunks.length > 0 && (
-                <div className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden">
-                    <div className="px-4 py-3 border-b border-slate-200 bg-slate-100 flex justify-between items-center">
-                        <h3 className="text-sm font-semibold text-slate-700">Chunk Preview & Start Selection</h3>
-                        <span className="text-xs text-slate-500">{previewChunks.length} chunks total</span>
-                    </div>
-                    <div className="max-h-60 overflow-y-auto p-2 space-y-2">
-                        {previewChunks.map((chunkText, idx) => {
-                            const isSkipped = idx < startChunkIndex;
-                            const isSelected = idx === startChunkIndex;
-                            return (
-                                <div 
-                                    key={idx}
-                                    onClick={() => !generationState.isGenerating && setStartChunkIndex(idx)}
-                                    className={`
-                                        group flex items-start gap-3 p-3 rounded-lg border text-sm transition-all cursor-pointer relative
-                                        ${isSelected 
-                                            ? 'bg-blue-50 border-blue-500 ring-1 ring-blue-500 z-10' 
-                                            : 'bg-white hover:border-blue-300 border-slate-200'
-                                        }
-                                        ${isSkipped ? 'opacity-40 bg-slate-100' : ''}
-                                    `}
-                                >
-                                    <div className={`
-                                        flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold
-                                        ${isSelected ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'}
-                                    `}>
-                                        {idx + 1}
-                                    </div>
-                                    <p className="line-clamp-2 text-slate-600 flex-1">{chunkText}</p>
-                                    
-                                    {!isSkipped && !isSelected && (
-                                        <div className="opacity-0 group-hover:opacity-100 absolute right-2 top-1/2 -translate-y-1/2 bg-white shadow-lg border border-slate-200 px-2 py-1 rounded text-xs text-blue-600 font-medium">
-                                            Start Here
-                                        </div>
-                                    )}
-                                    
-                                    {isSelected && (
-                                         <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 text-blue-600 text-xs font-bold bg-blue-50 px-2 py-1 rounded">
-                                            Starting Chunk <ArrowRight size={12}/>
-                                         </div>
-                                    )}
-                                </div>
-                            );
-                        })}
+                {/* Player Center */}
+                <div className="flex-1 max-w-2xl flex flex-col items-center justify-center gap-1">
+                    <audio 
+                        ref={audioRef}
+                        src={previewUrl || (finalBlob ? URL.createObjectURL(finalBlob) : undefined)} 
+                        controls 
+                        autoPlay={!!previewUrl} // Only auto play previews, not final download
+                        onEnded={handleAudioEnded}
+                        className="w-full h-8" 
+                    />
+                    <div className="text-[10px] text-slate-400 font-medium">
+                        {previewUrl ? `Previewing Chunk ${previewChunkCount} / ${readyChunksCount} ready` : 'Full Audiobook Playback'}
                     </div>
                 </div>
-            )}
 
-
-            {/* Error Message */}
-            {generationState.error && (
-                <div className={`
-                    p-4 rounded-lg border text-sm animate-pulse flex items-center gap-2
-                    ${generationState.error.includes("Pacing") || generationState.error.includes("Cooling")
-                        ? 'bg-amber-50 text-amber-700 border-amber-200'
-                        : 'bg-red-50 text-red-700 border-red-200'
-                    }
-                `}>
-                    {generationState.error.includes("Pacing") ? <Loader2 className="w-4 h-4 animate-spin"/> : <AlertTriangle className="w-4 h-4"/>}
-                    <strong>Status:</strong> {generationState.error}
-                </div>
-            )}
-
-            {/* Action Bar */}
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-100">
-                <div className="flex-1 w-full space-y-3">
-                    {generationState.isGenerating && (
-                        <div className="space-y-2">
-                            <div className="flex justify-between text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                                <span>Generating Chunk {generationState.currentChunkIndex} of {generationState.totalChunks}</span>
-                                <span>{Math.round(generationState.progress)}%</span>
-                            </div>
-                            <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                                <div 
-                                    className="h-full bg-blue-600 transition-all duration-300 ease-out"
-                                    style={{ width: `${generationState.progress}%` }}
-                                />
-                            </div>
-                            <div className="text-[10px] text-slate-400 text-center pt-1">
-                                Auto-downloading chunks for safety...
-                            </div>
-                        </div>
-                    )}
-                    
-                    {/* Real-time Preview Player (Shown when generating or stopped but not finished) */}
-                    {(generationState.isGenerating || (!finalBlob && readyChunksCount > 0)) && (
-                         <div className="bg-slate-50 p-2 rounded-lg border border-slate-200 flex flex-col gap-2">
-                             {!previewUrl ? (
-                                <button 
-                                    onClick={handlePlayPreview}
-                                    disabled={readyChunksCount === 0}
-                                    className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white border border-blue-200 text-blue-700 text-xs font-bold uppercase tracking-wide rounded hover:bg-blue-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    <Volume2 size={14} />
-                                    {readyChunksCount > 0 ? `Play ${readyChunksCount} Rendered Chunks` : 'Waiting for chunks...'}
-                                </button>
-                             ) : (
-                                <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-300">
-                                    <audio 
-                                        ref={audioRef}
-                                        src={previewUrl} 
-                                        controls 
-                                        autoPlay 
-                                        onEnded={handleAudioEnded}
-                                        className="flex-1 h-8 block w-full" 
-                                    />
-                                    <button 
-                                        onClick={handleClosePreview}
-                                        className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-full transition-colors"
-                                        title="Close Preview"
-                                    >
-                                        <X size={16} />
-                                    </button>
-                                </div>
-                             )}
-                             {previewUrl && (
-                                 <div className="text-[10px] text-slate-400 text-center flex items-center justify-center gap-1">
-                                     <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-                                     Listening to {previewChunkCount} chunks (Auto-updates when you finish listening)
-                                 </div>
-                             )}
-                         </div>
-                    )}
-
-                    {!generationState.isGenerating && finalBlob && (
-                         <div className="flex items-center gap-2 text-green-600 bg-green-50 px-3 py-2 rounded-lg text-sm font-medium border border-green-100">
-                             <Sparkles className="w-4 h-4" />
-                             Audiobook Ready! ({((finalBlob.size / 1024) / 1024).toFixed(2)} MB - {format.toUpperCase()})
-                         </div>
-                    )}
-                </div>
-
-                <div className="flex gap-3 w-full sm:w-auto">
-                     {generationState.isGenerating ? (
-                         <button
-                            onClick={handleStop}
-                            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-3 bg-red-100 text-red-700 font-semibold rounded-xl hover:bg-red-200 transition-colors"
-                        >
-                            <StopCircle size={20} />
-                            Stop
-                        </button>
-                     ) : (
+                {/* Actions Right */}
+                <div className="w-1/4 flex justify-end gap-3">
+                     {finalBlob && (
                         <button
-                            onClick={handleGenerate}
-                            disabled={!text || generationState.isGenerating}
-                            className={`
-                                flex-1 sm:flex-none flex items-center justify-center gap-2 px-8 py-3 rounded-xl font-semibold text-white shadow-lg shadow-blue-200 transition-all
-                                ${!text 
-                                    ? 'bg-slate-300 cursor-not-allowed shadow-none' 
-                                    : 'bg-blue-600 hover:bg-blue-700 hover:scale-[1.02]'
-                                }
-                            `}
+                            onClick={downloadFinalAudio}
+                            className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-medium transition-colors"
                         >
-                            {generationState.isGenerating ? <Loader2 className="animate-spin" /> : <Sparkles size={20} />}
-                            {startChunkIndex > 0 ? `Generate from Chunk ${startChunkIndex + 1}` : 'Generate Audiobook'}
+                            <Download size={16} />
+                            <span>Download {format.toUpperCase()}</span>
                         </button>
                      )}
                 </div>
             </div>
-        </section>
-
-        {/* Results Section */}
-        {finalBlob && (
-            <section className="bg-white rounded-2xl shadow-lg border border-slate-200 p-1">
-                 <div className="p-6 md:p-8 flex flex-col md:flex-row items-center gap-6 justify-between bg-slate-50/50 rounded-xl">
-                    <div className="flex items-center gap-4 w-full">
-                        <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center shrink-0">
-                            <Play className="fill-current w-5 h-5 ml-1" />
-                        </div>
-                        <div className="w-full">
-                            <audio 
-                                controls 
-                                className="w-full h-10 block" 
-                                src={URL.createObjectURL(finalBlob)} 
-                            />
-                        </div>
-                    </div>
-                    <button
-                        onClick={downloadFinalAudio}
-                        className="w-full md:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-slate-900 text-white font-medium rounded-xl hover:bg-slate-800 transition-colors"
-                    >
-                        <Download size={18} />
-                        Download .{format.toUpperCase()}
-                    </button>
-                 </div>
-            </section>
         )}
 
-        {/* Debug/Chunk View (Processing) */}
-        {audioChunks.length > 0 && (
-             <section className="space-y-4">
-                 <h3 className="text-lg font-semibold text-slate-800 px-1">Processing Details</h3>
-                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                     {audioChunks.map((chunk) => (
-                         <div 
-                            key={chunk.id} 
-                            className={`
-                                p-4 rounded-xl border text-sm transition-colors
-                                ${chunk.status === 'completed' && chunk.data ? 'bg-white border-green-200 shadow-sm' : ''}
-                                ${chunk.status === 'completed' && !chunk.data ? 'bg-slate-100 border-slate-200 text-slate-400' : ''} 
-                                ${chunk.status === 'generating' ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-100' : ''}
-                                ${chunk.status === 'pending' ? 'bg-slate-50 border-slate-100 text-slate-400' : ''}
-                                ${chunk.status === 'error' ? 'bg-red-50 border-red-200' : ''}
-                            `}
-                        >
-                             <div className="flex justify-between items-center mb-2">
-                                 <span className="font-medium text-slate-500">Chunk {chunk.id + 1}</span>
-                                 <span className={`
-                                     text-xs font-bold px-2 py-0.5 rounded-full uppercase tracking-wider
-                                     ${chunk.status === 'completed' && chunk.data ? 'text-green-700 bg-green-100' : ''}
-                                     ${chunk.status === 'completed' && !chunk.data ? 'text-slate-500 bg-slate-200' : ''}
-                                     ${chunk.status === 'generating' ? 'text-blue-700 bg-blue-100' : ''}
-                                     ${chunk.status === 'pending' ? 'text-slate-500 bg-slate-200' : ''}
-                                     ${chunk.status === 'error' ? 'text-red-700 bg-red-100' : ''}
-                                 `}>
-                                     {chunk.status === 'completed' && !chunk.data ? 'SKIPPED' : chunk.status}
-                                 </span>
-                             </div>
-                             <p className="line-clamp-3 text-slate-600">{chunk.text}</p>
-                         </div>
-                     ))}
-                 </div>
-             </section>
-        )}
       </main>
+
+      {/* Settings Modal (Overlay) */}
+      {showSettings && (
+          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
+                  <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                      <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                          <Settings size={18} /> Settings
+                      </h3>
+                      <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-600">
+                          <X size={18} />
+                      </button>
+                  </div>
+                  
+                  <div className="p-6 space-y-6">
+                      {/* Paid Key Promo */}
+                      <div className="bg-slate-900 rounded-xl p-5 text-center space-y-3 relative overflow-hidden">
+                           <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-br from-amber-400 to-transparent opacity-20 blur-xl" />
+                           <div className="w-10 h-10 bg-amber-500/20 text-amber-500 rounded-full flex items-center justify-center mx-auto mb-2">
+                                <ShieldCheck size={20} />
+                           </div>
+                           <h4 className="text-white font-bold">Rate Limits? Go Pro.</h4>
+                           <p className="text-xs text-slate-400 leading-relaxed">
+                               Gemini 2.5 Pro models require a paid cloud project for high-volume generation.
+                           </p>
+                           <button 
+                               onClick={handleSelectPaidKey}
+                               className="w-full py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg text-sm transition-colors"
+                           >
+                               Select Paid API Key
+                           </button>
+                           <a href="https://ai.google.dev/pricing" target="_blank" rel="noreferrer" className="text-[10px] text-slate-500 hover:text-slate-300 underline block mt-2">
+                               View Pricing Documentation
+                           </a>
+                      </div>
+
+                      <div className="space-y-2">
+                          <label className="text-sm font-semibold text-slate-700">Manual API Key (Optional)</label>
+                          <div className="flex gap-2">
+                              <input 
+                                  type="password" 
+                                  value={userApiKey}
+                                  onChange={handleApiKeyChange}
+                                  placeholder="Paste key here..."
+                                  className={`flex-1 px-3 py-2 rounded-lg border text-sm outline-none ${keyStatus === 'valid' ? 'border-green-300 bg-green-50' : 'border-slate-300'}`}
+                              />
+                              <button onClick={testApiKey} disabled={!userApiKey} className="px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-sm font-medium hover:bg-slate-200">
+                                  {keyStatus === 'validating' ? <Loader2 size={14} className="animate-spin"/> : 'Test'}
+                              </button>
+                          </div>
+                          {keyStatusMessage && (
+                              <p className={`text-xs ${keyStatus === 'valid' ? 'text-green-600' : 'text-red-500'}`}>{keyStatusMessage}</p>
+                          )}
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
     </div>
   );
 };

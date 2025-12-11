@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { FileText, Upload } from 'lucide-react';
+import { Upload } from 'lucide-react';
 
 interface TextInputProps {
   text: string;
@@ -23,20 +23,15 @@ const TextInput: React.FC<TextInputProps> = ({ text, onTextChange, disabled }) =
   };
 
   return (
-    <div className="flex flex-col gap-2 h-full">
-      <div className="flex justify-between items-center mb-1">
-        <label className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-          <FileText className="w-4 h-4" />
-          Script
-        </label>
-        <div className="flex gap-2">
+    <div className="flex flex-col h-full relative">
+      <div className="absolute top-0 right-0 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
            <button
             onClick={() => fileInputRef.current?.click()}
             disabled={disabled}
-            className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-800 disabled:opacity-50 font-medium px-2 py-1 rounded hover:bg-blue-50 transition-colors"
+            className="text-xs flex items-center gap-1 text-slate-500 hover:text-blue-600 font-medium px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 hover:bg-blue-50 transition-colors"
           >
             <Upload className="w-3 h-3" />
-            Import .txt
+            Import Text File
           </button>
           <input
             type="file"
@@ -45,17 +40,20 @@ const TextInput: React.FC<TextInputProps> = ({ text, onTextChange, disabled }) =
             className="hidden"
             onChange={handleFileUpload}
           />
-        </div>
       </div>
+      
+      {/* Manuscript Area */}
       <textarea
         value={text}
         onChange={(e) => onTextChange(e.target.value)}
         disabled={disabled}
-        placeholder="Enter your text here or upload a .txt file..."
-        className="w-full min-h-[200px] p-4 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none resize-y text-slate-800 leading-relaxed shadow-sm font-light text-lg transition-all"
+        placeholder="Once upon a time..."
+        className="w-full h-full min-h-[500px] bg-transparent outline-none resize-none text-slate-800 leading-relaxed font-serif text-lg placeholder:text-slate-300 placeholder:font-sans"
+        spellCheck={false}
       />
-      <div className="text-right text-xs text-slate-400">
-        {text.length} characters
+      
+      <div className="absolute bottom-0 right-0 text-[10px] text-slate-300 font-mono pointer-events-none select-none">
+        {text.length > 0 ? `${text.length} chars` : ''}
       </div>
     </div>
   );
