@@ -37,8 +37,14 @@ const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoice, onVoiceCha
       try {
           const translated = await translateText(textToTranslate, newLang);
           setSampleText(translated);
-      } catch (err) {
+      } catch (err: any) {
           console.error("Failed to translate", err);
+          let msg = "Failed to translate.";
+          if (err?.message?.includes('429') || JSON.stringify(err).includes('RESOURCE_EXHAUSTED')) {
+             msg = "Translation rate limit exceeded. Please wait.";
+          }
+          // We don't alert for translation, just log, but maybe could show a toast.
+          // For now, silently failing to original text is standard behavior, user can try again.
       } finally {
           setIsTranslating(false);
       }
@@ -87,11 +93,24 @@ const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoice, onVoiceCha
         setPlayingVoice(voice);
         setLoadingVoice(null);
 
-    } catch (error) {
+    } catch (error: any) {
         console.error("Failed to generate voice preview:", error);
         setLoadingVoice(null);
         setPlayingVoice(null);
-        alert("Failed to generate preview. Check console for details.");
+        
+        // Detect 429
+        let msg = "Failed to generate preview. Check console for details.";
+        const errStr = JSON.stringify(error);
+        if (
+            errStr.includes('429') || 
+            errStr.includes('RESOURCE_EXHAUSTED') || 
+            error?.error?.code === 429 ||
+            error?.status === 429 ||
+            error?.message?.includes('429')
+        ) {
+             msg = "Quota exceeded (Rate Limit). Please wait a few moments and try again.";
+        }
+        alert(msg);
     }
   };
 
