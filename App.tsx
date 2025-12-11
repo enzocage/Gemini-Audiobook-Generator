@@ -228,49 +228,31 @@ const App: React.FC = () => {
 
         let pcmData: Uint8Array | null = null;
         let attempts = 0;
-        const maxRetries = 10; // Increased retries for rate limits
+        const maxRetries = 8; 
         
         while(attempts < maxRetries && !pcmData && !abortRef.current) {
              try {
                  const base64Data = await generateSpeechChunk(textChunksToProcess[i], voice, model);
                  pcmData = base64ToUint8Array(base64Data);
              } catch (err: any) {
-                 // Enhanced Error Extraction
-                 let errorMessage = "";
-                 const errAny = err as any;
-
-                 if (errAny?.error?.message) {
-                    errorMessage = errAny.error.message;
-                 } else if (errAny?.message) {
-                    errorMessage = errAny.message;
-                 } else {
-                    errorMessage = JSON.stringify(errAny);
-                 }
-
-                 // Check for 429 in various forms
-                 const isRateLimit = errorMessage.includes('429') || 
-                                     errorMessage.includes('quota') || 
-                                     errorMessage.includes('RESOURCE_EXHAUSTED') ||
-                                     errorMessage.includes('Too Many Requests') ||
-                                     errAny?.error?.code === 429 ||
-                                     errAny?.status === 429;
+                 const isRateLimit = err?.isRateLimit === true;
+                 const errorMessage = err?.message || "Unknown error";
                  
-                 console.warn(`Attempt ${attempts + 1} failed for chunk ${i + 1}. Rate Limit: ${isRateLimit}`, errorMessage);
+                 console.warn(`Attempt ${attempts + 1} failed for chunk ${i + 1}. Rate Limit Detected: ${isRateLimit}`, errorMessage);
                  attempts++;
                  
                  if (attempts >= maxRetries) {
                      const friendlyError = isRateLimit 
-                         ? "Quota exceeded (Rate Limit). Please try again later or check your API plan." 
+                         ? "Quota exceeded (Rate Limit). Please try again later." 
                          : errorMessage;
-                     throw new Error(`Failed to generate part ${i + 1} after ${maxRetries} attempts. ${friendlyError}`);
+                     throw new Error(`Failed to generate part ${i + 1}. ${friendlyError}`);
                  }
 
                  // Backoff Strategy
                  let delay = 2000 * Math.pow(2, attempts); 
                  
-                 // If rate limit, use a much more aggressive backoff (15s minimum)
                  if (isRateLimit) {
-                     // 15s + (attempt * 5s) -> 15, 20, 25, 30...
+                     // Aggressive backoff for rate limits: 15s start + linear increase
                      delay = 15000 + (attempts * 5000); 
                      setGenerationState(prev => ({ 
                          ...prev, 
@@ -284,8 +266,10 @@ const App: React.FC = () => {
                  }
 
                  await new Promise(r => setTimeout(r, delay));
-                 // Clear error display if we are retrying successfully (or just waiting)
-                 if (isRateLimit) setGenerationState(prev => ({ ...prev, error: undefined }));
+                 // Clear error display if we are retrying
+                 if (isRateLimit || generationState.error) {
+                    setGenerationState(prev => ({ ...prev, error: undefined }));
+                 }
              }
         }
 
@@ -338,7 +322,7 @@ const App: React.FC = () => {
           error: error instanceof Error ? error.message : "An unexpected error occurred" 
       }));
     }
-  }, [text, voice, model, format, downloadBlob, previewChunks, startChunkIndex]);
+  }, [text, voice, model, format, downloadBlob, previewChunks, startChunkIndex, generationState.error]);
 
   const handleStop = () => {
       abortRef.current = true;

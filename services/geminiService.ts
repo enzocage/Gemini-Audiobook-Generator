@@ -6,6 +6,55 @@ import { VoiceName } from "../types";
 // The system prompt guarantees this is available.
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
+const handleGeminiError = (error: any) => {
+  console.error("Gemini API Error:", error);
+
+  let message = "An unexpected error occurred.";
+  let isRateLimit = false;
+
+  // Helper to check for rate limit keywords
+  const checkRateLimit = (msg: string) => {
+      return msg.includes('429') || 
+             msg.includes('quota') || 
+             msg.includes('RESOURCE_EXHAUSTED') || 
+             msg.includes('Too Many Requests');
+  };
+
+  if (error instanceof Error) {
+    message = error.message;
+    // Attempt to parse JSON in message (SDK sometimes throws JSON string)
+    try {
+      if (message.trim().startsWith('{')) {
+        const parsed = JSON.parse(message);
+        if (parsed.error) {
+          message = parsed.error.message || message;
+          if (parsed.error.code === 429) isRateLimit = true;
+        }
+      }
+    } catch (e) {}
+  } else if (typeof error === 'object' && error !== null) {
+      // Handle raw object errors if thrown directly
+      if ((error as any).error) {
+         const errObj = (error as any).error;
+         message = errObj.message || JSON.stringify(errObj);
+         if (errObj.code === 429) isRateLimit = true;
+      } else {
+         message = JSON.stringify(error);
+      }
+  } else {
+      message = String(error);
+  }
+
+  // Fallback check on the final message string
+  if (checkRateLimit(message)) {
+      isRateLimit = true;
+  }
+
+  const enhancedError = new Error(message);
+  (enhancedError as any).isRateLimit = isRateLimit;
+  throw enhancedError;
+};
+
 export const generateSpeechChunk = async (
   text: string,
   voice: VoiceName,
@@ -41,7 +90,7 @@ export const generateSpeechChunk = async (
 
     return part.inlineData.data;
   } catch (error) {
-    console.error("Gemini API Error:", error);
+    handleGeminiError(error);
     throw error;
   }
 };

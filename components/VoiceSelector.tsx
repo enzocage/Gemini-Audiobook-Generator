@@ -35,16 +35,26 @@ const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoice, onVoiceCha
       
       setIsTranslating(true);
       try {
-          const translated = await translateText(textToTranslate, newLang);
+          // Simple retry loop for translation in case of rate limits
+          let translated = textToTranslate;
+          let retries = 3;
+          while(retries > 0) {
+             try {
+                translated = await translateText(textToTranslate, newLang);
+                break; 
+             } catch(err: any) {
+                 if (err?.isRateLimit && retries > 1) {
+                     await new Promise(r => setTimeout(r, 1500));
+                     retries--;
+                 } else {
+                     throw err;
+                 }
+             }
+          }
           setSampleText(translated);
       } catch (err: any) {
           console.error("Failed to translate", err);
-          let msg = "Failed to translate.";
-          if (err?.message?.includes('429') || JSON.stringify(err).includes('RESOURCE_EXHAUSTED')) {
-             msg = "Translation rate limit exceeded. Please wait.";
-          }
-          // We don't alert for translation, just log, but maybe could show a toast.
-          // For now, silently failing to original text is standard behavior, user can try again.
+          // If translation fails, we just don't update the text (fail silent or could show toast)
       } finally {
           setIsTranslating(false);
       }
@@ -69,7 +79,27 @@ const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoice, onVoiceCha
 
     try {
         const textToPlay = sampleText.trim() || DEFAULT_SAMPLE_TEXT;
-        const base64Data = await generateSpeechChunk(textToPlay, voice, model);
+        let base64Data: string | null = null;
+        
+        // Retry Loop for Preview
+        let retries = 3;
+        while(retries > 0) {
+            try {
+                base64Data = await generateSpeechChunk(textToPlay, voice, model);
+                break;
+            } catch(err: any) {
+                if (err?.isRateLimit && retries > 1) {
+                    console.warn("Preview rate limited, retrying...");
+                    await new Promise(r => setTimeout(r, 2000));
+                    retries--;
+                    continue;
+                }
+                throw err;
+            }
+        }
+
+        if (!base64Data) throw new Error("Failed to generate preview data");
+
         const pcmData = base64ToUint8Array(base64Data);
         const wavBlob = createWavFile(pcmData);
         const url = URL.createObjectURL(wavBlob);
@@ -82,7 +112,6 @@ const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoice, onVoiceCha
             URL.revokeObjectURL(url);
         };
         
-        // Handle load errors
         audio.onerror = () => {
              console.error("Audio playback error");
              setPlayingVoice(null);
@@ -98,16 +127,8 @@ const VoiceSelector: React.FC<VoiceSelectorProps> = ({ selectedVoice, onVoiceCha
         setLoadingVoice(null);
         setPlayingVoice(null);
         
-        // Detect 429
         let msg = "Failed to generate preview. Check console for details.";
-        const errStr = JSON.stringify(error);
-        if (
-            errStr.includes('429') || 
-            errStr.includes('RESOURCE_EXHAUSTED') || 
-            error?.error?.code === 429 ||
-            error?.status === 429 ||
-            error?.message?.includes('429')
-        ) {
+        if (error?.isRateLimit) {
              msg = "Quota exceeded (Rate Limit). Please wait a few moments and try again.";
         }
         alert(msg);
